@@ -1,0 +1,4 @@
+.venv_docker/
+.env
+__pycache__
+.vscode/
