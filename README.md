@@ -176,6 +176,10 @@ class User_Login_OTP_Display (BaseModel):
     Expiration_Time = datetime
 ```
 
+> Các tên trong lược đồ và kết quả trả về phải trùng khớp với nhau (phân biệt chữ hoa chữ thường)  
+> Như vậy thì lược đồ mới tự động chọn lọc các thông tin trùng nhau, bỏ các thông tin không cần thêm vào lược đồ  
+> Đối với các dữ liệu trả về từ Databse thì tốt nhất nên đặt tên các trường trong lược đồ trùng tên với các cột trong Database  
+
 ### 2.3 Thực hiện truy vấn CSDL
 
 Đối với các câu lệnh truy vấn tới CSDL, ta phân chia các câu lệnh thành các tệp truy vấn tương ứng với từng bảng. Ví dụ với bảng `User_Login` ta thực hiện tất cả các câu truy vấn tại tệp [db_user_login](src/db/db_user_login.py).  
@@ -226,4 +230,59 @@ def create_new_user_login(db: Session, new_user_login: DbUser_Login):
     
     return response 
 ```
-Luôn chạy các câu lệnh thao tác với CSDL vào khối `try-except` để xử lý tốt các trường hợp lỗi xảy ra. 
+Luôn chạy các câu lệnh thao tác với CSDL vào khối `try-except` để xử lý tốt các trường hợp lỗi xảy ra.  
+
+## 3.Tạo endpoint cho các api
+
+Đối với mỗi api ta sẽ để vào thư mục [api](src/api), ví dụ với api: `user_login` có thể tham khảo tại tệp [user_login](src/api/user_login.py).  
+Ta đặt tên tệp trùng với endpoint để tạo sự đồng nhất, dễ nhận biết và sửa lỗi sau này.  
+Với mỗi endpoint ta cần khai báo tiền tố của endpoint đó.  
+```python
+# Khai báo router với tiền tố cho các endpoint là: /user_login/xxx
+router = APIRouter(
+    prefix = "/user_login",
+    tags= ["User Login"]
+)
+```
+Mặc định các endpoint sẽ được tự động thêm tiền tố `prefix` vào đầu các địa chỉ. Ví dụ: `http://172.31.99.130:8000/user_login/abc_enpoint`  
+
+### 3.1 Các enpoint không cần xác thực người dùng (Non Authentication)
+Với mỗi endpoint ta khai báo như sau:  
+```python
+@router.post("/new_user", response_model = User_Login_Display)
+def create_user(request: User_Login_Base, db: Session = Depends(get_db)):
+    """
+    Tạo thông tin người dùng vào CSDL
+    """
+    return User_Login_Controller.create_user(db= db, request= request)
+```
+Đầu tiên cần nhận định phương thức của endponit này là thuộc các phương thức sau:  
+- `get`: Lấy dữ liệu từ máy chủ và trả về  
+- `put`: Ghi đè dữ liệu được gửi từ client lên máy chủ  
+- `post`: Gửi thông tin tới máy chủ, thường là biểu mẫu dùng để đăng ký mới  
+- `delete`: Xóa tài nguyên trên máy chủ  
+
+Khi 1 api được khai báo với phương thức là `post` nhưng khi bạn sử dụng nó với phương thức khác như `get`, `delete`, ... thì sẽ nhận được lỗi `405 (Method not allowed)`.  
+
+Sau đó tạo đường dẫn cho router này bằng 2 loại:  
+- Tham số không nằm trong đường dẫn: là đường dẫn chỉ chứa các hằng số, ko chứa các biến  
+Ví dụ: `"/new_user"`, `"/check_user/my_db"`, ...  
+- Tham số nằm trong đường dẫn: Là đường dẫn mà trong đó chứa các tham số được người dùng truyền vào  
+Ví dụ: `"/activate_user/{email_user}"`, `"/get_user/{department}"`, ...  
+
+Ta có thể thêm tùy chọn `response_mode` là kiểu trả về cho người dùng. Khi ta muốn giới hạn tham số trả về cho người dùng, ẩn đi các tham số nhạy cảm như mật khẩu, token,... thì ta có thể sử dụng kiểu trả về như này, router mặc định chỉ giữa lại các tham số giống với lược đồ đã khai báo.  
+Tham số của `response_mode` là một lược đồ đã được khai báo ở [schemas](src/schemas/schemas.py) và đã hướng dẫn chi tiết phía trên. Còn nếu không thêm tham số trả về này thì mặc định khi router trả về bất cứ cái gì thì nó sẽ giữ nguyên như vậy.  
+
+Sau khi đã tạo router, ta tạo hàm xử lý cho router đó, mỗi khi có người gọi vào api thì hàm xử lý sẽ được chạy và trả về kết quả mong muốn.  
+```python
+def create_user(request: User_Login_Base, db: Session = Depends(get_db)):
+```
+Endpoint `/user_login/new_user` sẽ gọi hàm `create_user` với các tham số yêu cầu như sau:  
+- `request`: tham số này tuân thủ theo lược đồ `User_Login_Base`  
+- `db`: tham số này tuân thủ theo yêu cầu `Session` của Database và có hàm phụ thuộc `Depends(get_db)`. Hàm `Depends` có ý nghĩa là sẽ gọi hàm `get_db` trước khi chạy vào hàm `create_user` nhằm mục đích tạo kết nối tới CSDL trước khi chạy các câu lệnh khác.  
+
+Sau đó hàm `create_user` gọi tới controller kiểm soát các hành vi của endpoint này.  
+
+### 3.2 Các endpoint cần xác thực người dùng (Authentication)
+
+Với một số endpoint bảo mật, không thể tùy ý cho bất cứ ai cũng sử dụng được. Ta cần xác thực người dùng, xem họ có quyền sử dụng api này hay không. Ví dụ với các thao tác như xóa dữ liệu, thay đổi dữ liệu ta nên hạn chế việc ai cũng có thể sử dụng api này. Vì vậy ta tạo ra một phương thức xác thực trước khi cho họ thao tác với api.  
