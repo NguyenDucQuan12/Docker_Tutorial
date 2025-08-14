@@ -5,12 +5,20 @@ from db.database import get_db
 from controllers.user_login_controller import User_Login_Controller
 from auth.oauth2 import get_info_user_via_token
 
-
+# Khai báo router với tiền tố cho các endpoint là: /user_login/xxx
 router = APIRouter(
     prefix = "/user_login",
     tags= ["User Login"]
 )
 
+
+@router.get("/list_users", response_model = list[User_Login_Display])
+def get_list_users(db: Session = Depends(get_db)):
+    """
+    Truy vấn danh sách người dùng hiện có  
+    `Giới hạn 1000 người`
+    """
+    return User_Login_Controller.get_all_users(db= db)
 
 @router.post("/new_user", response_model = User_Login_Display)
 def create_user(request: User_Login_Base, db: Session = Depends(get_db)):
@@ -18,14 +26,6 @@ def create_user(request: User_Login_Base, db: Session = Depends(get_db)):
     Tạo thông tin người dùng vào CSDL
     """
     return User_Login_Controller.create_user(db= db, request= request)
-
-@router.get("/list-users", response_model = list[User_Login_Display])
-def get_list_users(db: Session = Depends(get_db)):
-    """
-    Truy vấn danh sách người dùng hiện có  
-    `Giới hạn 1000 người`
-    """
-    return User_Login_Controller.get_all_users(db= db)
 
 @router.put("/activate_user/{email_user}")
 def activate_user(email_user: str, activate: bool, db: Session = Depends(get_db), current_user : UserAuth = Depends(get_info_user_via_token)):
