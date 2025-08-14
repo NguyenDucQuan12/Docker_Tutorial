@@ -37,16 +37,16 @@ class User_Login_Full_Display(BaseModel):
     """
     Trả về đầy đủ các thông tin từ người dùng
     """
-    ID = str
-    User_Name = str
-    Email = str
-    Password = str
-    Avatar = str
-    Privilege = str
-    Activate = datetime
-    OTP_Code = str
-    Expiration_Time = datetime
-    Status = str
+    ID : str
+    User_Name : str
+    Email : str
+    Password : str
+    Avatar : str
+    Privilege : str
+    Activate : datetime
+    OTP_Code : str
+    Expiration_Time : datetime
+    Status : str
     class Config():
         from_attributes = True
 
@@ -54,8 +54,8 @@ class User_Login_OTP_Display (BaseModel):
     """
     Trả về các thông tin khi người dùng truy vấn mã OTP
     """
-    ID = str
-    User_Name = str
-    Email = str
-    OTP_Code = str
-    Expiration_Time = datetime
+    ID : str
+    User_Name : str
+    Email : str
+    OTP_Code : str
+    Expiration_Time : datetime
