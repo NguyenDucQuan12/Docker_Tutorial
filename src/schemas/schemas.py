@@ -59,3 +59,13 @@ class User_Login_OTP_Display (BaseModel):
     Email : str
     OTP_Code : str
     Expiration_Time : datetime
+
+class UserAuth(BaseModel):
+    """
+    Trả về thông tin người dùng khi giải mã token
+    """
+    ID: str
+    Name: str
+    Email: str
+    Avatar: str
+    Privilege: str
