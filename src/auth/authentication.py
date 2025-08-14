@@ -9,7 +9,7 @@ from auth import oauth2
 
 router = APIRouter(
     prefix="/auth",
-    tags=["authentication"]
+    tags=["Authentication"]
 )
 
 # Địa chỉ này phải đúng với tokenURL trong: oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
