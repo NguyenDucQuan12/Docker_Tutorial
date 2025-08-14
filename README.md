@@ -183,32 +183,18 @@ class User_Login_OTP_Display (BaseModel):
 Tại đây khi ta yêu cầu người dùng cung cấp các thông tin, ta có thể sử dụng các lược đồ đã tạo trước đó để người dùng có thể nhập thông tin tốt hơn, tránh nhập các thông tin ngoài lược đồ.  
 
 ```python
-from schemas.schemas import User_Login_Base
-
-def create_new_user_login(db: Session, request: User_Login_Base):
+def create_new_user_login(db: Session, new_user_login: DbUser_Login):
 
     """
-    Tạo thông tin người đăng nhập mới và mã hóa mật khẩu trước khi lưu vào CSDL  
-    - `request`: Thông tin mà người dùng cần cung cấp  
-
-    Kết quả trả về:  
-    200:  
-    - `new_user_login`: Thông tin người dùng mới  
-    500:  
-    - `"message": "Lỗi khi thêm người dùng mới"`
+    Tạo người dùng mới vào CSDL
+    - `new_user_login`: Thông tin người dùng mới cần thêm vào CSDL  
     """
-    # Tạo id cho một người
-    new_user_id = get_random_string(32)
-    
-    # Khai báo các thông tin cho người dùng mới
-    new_user_login =  DbUser_Login(
-        ID = new_user_id, 
-        User_Name = request.User_Name,
-        Email = request.Email ,
-        Password = Hash.bcrypt(request.Password), # mã hóa mật khẩu
-        Avatar = DEFAULT_AVATAR,
-        Privilege = DEFAULT_PRIVILEGE
-    )
+    # Cú pháp trả về khi gọi CSDL
+    response = {
+        "success": False,
+        "data": None,
+        "message": "Lỗi khi thêm người dùng mới"
+    }
 
     # Tiến hành ghi dữ liệu
     try:
@@ -217,18 +203,27 @@ def create_new_user_login(db: Session, request: User_Login_Base):
         # refresh giúp nhận được giá trị ID của người dùng, vì nó là giá trị tự tăng
         db.refresh(new_user_login)
 
-    except exc.SQLAlchemyError as e:   
-        # Trong quá trình insert lỗi thì giá trị id (cột IDENTITY) vẫn tự tăng, đây là hành vi mặc định của SQL Server
-        # Rollback lại giao dịch
+        # Trả về kết quả thành công
+        response["message"] = "Thêm người dùng mới thành công"
+        response["success"] = True
+        response["data"] = new_user_login
+
+    except exc.IntegrityError as e:  # Bắt lỗi vi phạm ràng buộc (ví dụ: khóa chính, khóa ngoại)
         db.rollback()
-        # Trả về lỗi
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "message": f"Lỗi khi thêm người dùng {request.User_Name}: {str(e)}"
-            }
-        )
+        response["message"] = f"Lỗi khi thêm người dùng mới: Vi phạm ràng buộc dữ liệu ({str(e)})"
     
-    return new_user_login 
+    except exc.DataError as e:  # Bắt lỗi kiểu dữ liệu không hợp lệ (ví dụ: vượt quá độ dài chuỗi, kiểu dữ liệu sai)
+        db.rollback()
+        response["message"] = f"Lỗi khi thêm người dùng mới: Lỗi dữ liệu ({str(e)})"
+    
+    except exc.SQLAlchemyError as e:  # Bắt tất cả các lỗi khác từ SQLAlchemy
+        db.rollback()
+        response["message"] = f"Lỗi khi thêm người dùng mới: {str(e)}"
+    
+    except Exception as e:  # Bắt tất cả các lỗi ngoài SQLAlchemy
+        db.rollback()
+        response["message"] = f"Lỗi không xác định: {str(e)}"        
+    
+    return response 
 ```
-Ta truyền lược đồ vào câu lệnh tạo tài khoản mới: `request: User_Login_Base`. Khi đó tham số `request` sẽ tuân thủ theo lược đồ mà ta đã khai báo, và ta có thể truy vấn các thông tin cụ thể từ lược đồ thông qua thuộc tính trong nó: `request.User_Name`, ... Như vậy ta sẽ lấy các thông tin mà chúng ta muốn, nếu người dùng nhập nhiều hơn các trường thì ta cũng chỉ lấy các giá trị cụ thể bằng lược đồ.  
+Luôn chạy các câu lệnh thao tác với CSDL vào khối `try-except` để xử lý tốt các trường hợp lỗi xảy ra. 
