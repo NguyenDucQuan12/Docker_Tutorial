@@ -1,13 +1,14 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm.session import Session
-from schemas.schemas import  User_Login_Base, User_Login_Display
+from schemas.schemas import  User_Login_Base, User_Login_Display, UserAuth
 from db.database import get_db
-from db import db_user_login
+from controllers.user_login_controller import User_Login_Controller
+from auth.oauth2 import get_info_user_via_token
 
 
 router = APIRouter(
     prefix = "/user_login",
-    tags= ["user"]
+    tags= ["User Login"]
 )
 
 
@@ -16,9 +17,36 @@ def create_user(request: User_Login_Base, db: Session = Depends(get_db)):
     """
     Tạo thông tin người dùng vào CSDL
     """
-    return db_user_login.create_new_user_login(db= db, request= request)
+    return User_Login_Controller.create_user(db= db, request= request)
 
 @router.get("/list-users", response_model = list[User_Login_Display])
 def get_list_users(db: Session = Depends(get_db)):
-   
-    return db_user_login.get_all_user_login(db= db)
+    """
+    Truy vấn danh sách người dùng hiện có  
+    `Giới hạn 1000 người`
+    """
+    return User_Login_Controller.get_all_users(db= db)
+
+@router.put("/activate_user/{email_user}")
+def activate_user(email_user: str, activate: bool, db: Session = Depends(get_db), current_user : UserAuth = Depends(get_info_user_via_token)):
+    """
+    Kích hoạt hoặc hủy kích hoạt người dùng
+    - `email_user`: Email của người dùng cần kích hoạt hoặc hủy kích hoạt
+    - `activate`: True để kích hoạt, False để hủy kích hoạt
+    """    
+    return User_Login_Controller.activate_user(db= db, email_user= email_user, activate= activate, current_user = current_user)
+
+@router.put("/change_privilege_user/{email_user}")
+def change_privilege_user(email_user: str, privilege: str,  db: Session = Depends(get_db), current_user : UserAuth = Depends(get_info_user_via_token)):
+    """
+    Thay đổi quyền hạn cho người dùng
+    """
+    return User_Login_Controller.change_privilege_user(db= db, email_user= email_user, privilege= privilege, current_user = current_user)
+
+@router.delete("/delete_user/{email_user}")
+def delete_user(email_user: str, db: Session = Depends(get_db), current_user : UserAuth = Depends(get_info_user_via_token)):
+    """
+    Xóa tài khoản người dùng
+    - `email_user`: Email của người dùng cần kích hoạt hoặc hủy kích hoạt
+    """    
+    return User_Login_Controller.delete_user(db= db, email_user= email_user, current_user = current_user)
