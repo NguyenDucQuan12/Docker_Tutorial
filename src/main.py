@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from db.database import engine
 from db import models
 from api import user_login
+from auth import authentication
 
 
 # Khởi tại FastAPi
@@ -18,6 +19,7 @@ app = FastAPI(
 
 # Thêm các endpoint ở đây
 app.include_router(user_login.router)
+app.include_router(authentication.router)
 
 
 @app.get("/check")
@@ -41,7 +43,7 @@ Mặc định các api trên cùng 1 máy không thể chia sẻ tài nguyên ch
 """
 origins = [
     "http://localhost:3000",
-    "http://192.168.0.145"
+    "http://172.31.99.130"
 ]
 
 app.add_middleware(
