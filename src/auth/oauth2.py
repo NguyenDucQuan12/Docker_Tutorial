@@ -32,7 +32,7 @@ async def get_optional_token(request: Request):
     # Kiểm tra trong request gửi lên có trường headers và có trường "Authorization" không
     auth: str = request.headers.get("Authorization")
     # Nếu tồn tại thì bắt đầu lấy token từ đoạn mã phía sau chữ: Bearer 
-    if auth and auth.lower().startswith("Bearer "):
+    if auth and auth.lower().startswith("bearer "):
         # ví dụ: headers = {
         #            "Authorization": "Bearer token_từ_đây"
         #        }
