@@ -286,3 +286,125 @@ Sau đó hàm `create_user` gọi tới controller kiểm soát các hành vi c�
 ### 3.2 Các endpoint cần xác thực người dùng (Authentication)
 
 Với một số endpoint bảo mật, không thể tùy ý cho bất cứ ai cũng sử dụng được. Ta cần xác thực người dùng, xem họ có quyền sử dụng api này hay không. Ví dụ với các thao tác như xóa dữ liệu, thay đổi dữ liệu ta nên hạn chế việc ai cũng có thể sử dụng api này. Vì vậy ta tạo ra một phương thức xác thực trước khi cho họ thao tác với api.  
+
+Một api có xác thực người dùng được khai báo như sau:  
+```python
+@router.delete("/delete_user/{email_user}")
+def delete_user(email_user: str, db: Session = Depends(get_db), current_user : UserAuth = Depends(get_info_user_via_token)):
+    """
+    Xóa tài khoản người dùng
+    - `email_user`: Email của người dùng cần kích hoạt hoặc hủy kích hoạt
+    """    
+    return User_Login_Controller.delete_user(db= db, email_user= email_user, current_user = current_user)
+```
+
+Cũng tương tự như với các endpoint không cần xác thực người dùng về phương thức, hàm, ... chỉ có sự khác biệt là với hàm gọi khi thực hiện truy vấn api ta có thêm: `current_user : UserAuth = Depends(get_info_user_via_token)`.  
+Trước khi người dùng được truy cập vào api ta phải xác thực người dùng trước đã, vì vậy ta có lệnh: `Depends(get_info_user_via_token)`, lệnh này sẽ gọi hàm `get_info_user_via_token` trước khi thực hiện hàm `delete_user`.  
+Hàm `get_info_user_via_token` sẽ giải mã token và lấy thông tin người dùng được đính kèm vào token gọi là `payload`. Tất cả thông tin về người dùng sẽ được lưu vào biến `current_user`. Biến này sẽ được đưa vào controller và chịu trách nhiệm phân tích, xử lý, ...  
+
+> Cách thức tạo token và xác thực có thể xem tại tệp [auth](src/auth/oauth2.py) và [authentication](src/auth/authentication.py)  
+
+Khi người dùng gọi api này, bắt buộc họ phải truyền vào api một tham số xác thực là `header`. `Header` này chứa token như sau:  
+```python
+# Địa chỉ URL của API cần gọi
+url = "http://172.31.99.130:8000/user_login/delete_user/{email_user}"
+
+# Thông tin cần truyền vào (email_user)
+email_user = "nguyenducquan2001@gmail.com"
+
+# Thêm headers( token xác thực)
+headers = {
+    "Authorization": f"Bearer {my_token}"
+}
+
+# Gọi API 
+response = requests.put(
+    url = url.format(email_user=email_user),
+    headers= headers
+)
+```
+### 3.3 Tạo controller xử lý các endpoint
+
+Sau khi tọa endpoint và các hàm xử lý khi api được gọi, để code rõ ràng, nhìn đẹp mắt, sau này cũng dễ sửa chữa, nâng cấp thì các thao tác khi người dùng gọi api sẽ được xử lý ở một trung gian kết nối tất cả (Database, authentication, cilent, ...) là `Controller`.  
+
+Các controller được đặt tại thư mục [controller](src/controllers). Mỗi controller sẽ được đặt tên trùng với api để dễ dàng nhận biết controller này chịu trách nhiệm xử lý cho api nào.  
+Với controller của `user_login` ta có thể tham khảo tại [user_login_controller](src/controllers/user_login_controller.py)  
+
+Khi gọi api tạo người dùng mới tại địa chỉ: ` http://172.31.99.130:8000/user_login/new_user`. Api này sẽ gọi tới hàm `create_user` và hàm `create_user` sẽ gọi tới controller để xử lý như sau:  
+
+```python
+def create_user(request: User_Login_Base, db: Session):
+    """
+    Tạo thông tin người dùng mới
+    """
+    # Tạo id ngẫu nhiên cho một người
+    new_user_id = get_random_string(32)
+
+    # Validate các thông tin người dùng mới
+    if not request.User_Name or not request.Email or not request.Password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Tên người dùng, email và mật khẩu là bắt buộc"
+            }
+        )
+    
+    # Kiểm tra email là hợp lệ
+    if not re.match(EMAIL_REGEX, request.Email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": f"Email {request.Email} không hợp lệ"
+            }
+        )
+    
+    # Ép các giá trị sang kiểu chuỗi
+    user_name = str(request.User_Name)
+    email = str (request.Email)
+    password = str(request.Password)
+
+    # Kiểm tra email đã tồn tại trên CSDL chưa
+    existing_user = db_user_login.get_user_login_by_email(db= db, email= email)
+
+    if existing_user["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": f"Email {request.Email} đã được sử dụng. Hãy lựa chọn tài khoản khác."
+            }
+        )
+    elif existing_user["success"] is False:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "message": f"Xảy ra lỗi trong quá trình tạo người dùng {request.Email}: {existing_user['message']}"
+            }
+        )
+    else:
+        # Khai báo các thông tin cho người dùng mới
+        new_user_login =  DbUser_Login(
+            ID = new_user_id, 
+            User_Name = user_name,
+            Email = email,
+            Password = Hash.bcrypt(password), # mã hóa mật khẩu
+            Avatar = DEFAULT_AVATAR,
+            Privilege = DEFAULT_PRIVILEGE
+        )
+
+        # Gọi hàm để thêm người dùng mới vào CSDL
+        new_user = db_user_login.create_new_user_login(db=db, new_user_login=new_user_login)  
+
+        # Kiểm tra kết quả trả về từ hàm tạo người dùng mới
+        if not new_user["success"]:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "message": new_user["message"]
+                }
+            ) 
+
+    return new_user["data"]
+```
+
+Ta nhận vào `request: User_Login_Base` là thông tin được yêu cầu người dùng nhập vào tuân theo lược đồ `User_Login_Base`.  
+Khi nhận được thông tin từ người dùng, ta cần phải xác thực lại tất cả thông tin từ người dùng, bởi vì nếu không cẩn thận, người dùng đưa thông tin sai sẽ khiến cho CSDL gặp trục trặc, có thể bị tấn công, ...  
