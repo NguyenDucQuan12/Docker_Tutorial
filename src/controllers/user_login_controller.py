@@ -227,7 +227,7 @@ class User_Login_Controller:
                 }
             )
         
-        # Tiến hành kích hoạt tài khoản người dùng
+        # Tiến hành xóa tài khoản người dùng
         delete_user = db_user_login.delete_user_login(db= db, email= email_user)
 
         message = {
