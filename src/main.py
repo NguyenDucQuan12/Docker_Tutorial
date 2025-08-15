@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from db.database import engine
 from db import models
-from api import user_login
+from api import user_login, file
 from auth import authentication
 
 
@@ -19,6 +19,7 @@ app = FastAPI(
 
 # Thêm các endpoint ở đây
 app.include_router(user_login.router)
+app.include_router(file.router)
 app.include_router(authentication.router)
 
 
