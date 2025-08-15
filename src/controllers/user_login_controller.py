@@ -86,7 +86,7 @@ class User_Login_Controller:
                     }
                 ) 
 
-            return new_user["data"]
+        return new_user["data"]
     
     def get_all_users(db: Session):
         """
