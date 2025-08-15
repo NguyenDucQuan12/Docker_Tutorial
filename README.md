@@ -325,7 +325,7 @@ response = requests.put(
 ```
 ### 3.3 Tạo controller xử lý các endpoint
 
-Sau khi tọa endpoint và các hàm xử lý khi api được gọi, để code rõ ràng, nhìn đẹp mắt, sau này cũng dễ sửa chữa, nâng cấp thì các thao tác khi người dùng gọi api sẽ được xử lý ở một trung gian kết nối tất cả (Database, authentication, cilent, ...) là `Controller`.  
+Sau khi tạo endpoint và các hàm xử lý khi api được gọi, để code rõ ràng, nhìn đẹp mắt, sau này cũng dễ sửa chữa, nâng cấp thì các thao tác khi người dùng gọi api sẽ được xử lý ở một trung gian kết nối tất cả (Database, authentication, cilent, ...) là `Controller`.  
 
 Các controller được đặt tại thư mục [controller](src/controllers). Mỗi controller sẽ được đặt tên trùng với api để dễ dàng nhận biết controller này chịu trách nhiệm xử lý cho api nào.  
 Với controller của `user_login` ta có thể tham khảo tại [user_login_controller](src/controllers/user_login_controller.py)  
@@ -408,3 +408,23 @@ def create_user(request: User_Login_Base, db: Session):
 
 Ta nhận vào `request: User_Login_Base` là thông tin được yêu cầu người dùng nhập vào tuân theo lược đồ `User_Login_Base`.  
 Khi nhận được thông tin từ người dùng, ta cần phải xác thực lại tất cả thông tin từ người dùng, bởi vì nếu không cẩn thận, người dùng đưa thông tin sai sẽ khiến cho CSDL gặp trục trặc, có thể bị tấn công, ...  
+
+Đối với các hàm yêu cầu xác thực người dùng ta cần kiểm tra xem người đang gọi api là ai và quyền của họ có bao gồm chức năng đang thực hiện hay không:  
+```python
+# Kiểm tra xem có quyền thao tác không
+if not current_user:
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "message": "Vui lòng xác thực người dùng trước khi thao tác"
+        }
+    )
+
+if current_user["Privilege"] not in HIGH_PRIVILEGE_LIST:
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "message": "Bạn không có quyền xóa tài khoản người dùng"
+        }
+    )
+```
