@@ -1,0 +1,45 @@
+services:
+  docker_api:
+    # Cài đặt và khởi động: docker-compose up --build -d
+    # Dừng lại image trước khi chạy lại: docker compose down
+    build:
+      context: .
+    image: fastapi-app:0.0.1
+    container_name: fastapi-app
+
+    # === Biến môi trường cho app ===
+    environment:
+
+      # === SQL Server trên host ===
+      DB_HOST: "host.docker.internal"   # Win/mac: OK; Linux cần extra_hosts bên dưới
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+
+      # === Thư mục gốc lưu file upload TRONG CONTAINER ===
+      UPLOAD_DIRECTORY: "/app/uploads"
+
+      # (tuỳ chọn) CORS
+      # ALLOWED_ORIGINS: "http://localhost:3000,http://172.31.99.130"
+    ports:
+      - "8000:8000"
+
+    # === Bind mount các thư mục cần ghi/đọc ===
+    volumes:
+      # Thư mục lưu file upload: host ./assets/file -> container /app/uploads
+      - type: bind
+        source: ./assets/file  # Đường dẫn trên máy chủ
+        target: /app/uploads   # Đường dẫn trong container (Phải trùng với khai báo phía trên)
+
+    # === Tự khởi động lại nếu crash ngoài ý muốn (Không khởi động lại do người dùng chủ động stop) ===
+    restart: unless-stopped
+    # Kiểm tra tình trạng của server
+    # Lệnh curl ... chạy trong chính container của service, không phải trên máy host.
+    # localhost nghĩa là bên trong container. Và app đang lắng nghe nội bộ cổng 8000
+    # -fsS ≈ --fail --silent --show-error: nếu HTTP status >= 400 thì trả về là lỗi, tắt progress/verbose (đỡ noisy), đi kèm -s để vẫn hiện lỗi khi fail (hữu ích để debug log).
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/readyz"]
+      interval: 30s  # mỗi 30s kiểm tra một lần.
+      timeout: 5s  # quá 5s chưa xong xem như fail.
+      retries: 3  #  fail liên tiếp 3 lần → container unhealthy
+      start_period: 15s  # chờ 15s sau khi container start rồi mới tính fail.
