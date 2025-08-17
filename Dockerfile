@@ -1,63 +1,62 @@
-FROM nvidia/cuda:11.7.1-cudnn8-runtime-ubuntu20.04
+# ========= 1) Chọn image Python (slim cho nhẹ) =========
+FROM python:3.12-slim AS base
 
-ENV DEBIAN_FRONTEND=noninteractive
+# ========= 1.1) ENV cơ bản =========
+# - Không tạo .pyc
+# - Log đi thẳng ra stdout (không buffer)
+# - Không lưu cache pip (image nhẹ)
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
 
-# Cài đặt các gói cần thiết
+# ========= 2) Cài gói hệ thống cần thiết =========
+# - build-essential: biên dịch một số lib Python (vd: pyodbc)
+# - curl, ca-certificates, gnupg: để thêm repo Microsoft và xác thực
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    software-properties-common \
-    curl \
-    unixodbc \
-    unixodbc-dev \
     build-essential \
-    libssl-dev \
-    libffi-dev \
-    tzdata \
-    libgl1 \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender1 \
+    curl \
+    ca-certificates \
+    gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-# Thêm kho lưu trữ cho Python 3.10
-RUN add-apt-repository ppa:deadsnakes/ppa
+# ========= 3) Cài ODBC Driver 18 + unixODBC cho SQL Server =========
+# Mặc định linux khi sử dụng thư viện msslq thì ko cần phải cài thêm driver hay gì thêm
+# Khi sử dụng pyodbc thì cần driver ODBC, mà trong linux không có driver ODBC nên ta sẽ cài ODBC phiên bản 18 (Sửa code khi kết nối sử dụng ODBC driver phiên bản 18)
 
-# Cài đặt Python 3.10 và pip
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.10 \
-    python3.10-distutils \
-    && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/ms-prod.gpg && \
+    echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/ms-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" > /etc/apt/sources.list.d/msprod.list && \
+    apt-get update && \
+    ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 unixodbc-dev && \
+    rm -rf /var/lib/apt/lists/*
 
-# Cài đặt pip cho Python 3.10
-RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.10
+# ========= 4) Tạo user non-root (an toàn hơn) =========
+# Không nên chạy với quyền root (Cao nhất) tránh các thao tác không đáng có, luôn hạn chế quyền
+# - Cố định UID/GID = 1000 giúp bind-mount từ host Linux đỡ vướng quyền
+RUN groupadd -g 1000 app && \
+    useradd -m -u 1000 -g app -s /usr/sbin/nologin app
 
-# Tạo liên kết cho python và pip
-RUN ln -s /usr/bin/python3.10 /usr/bin/python \
-    && ln -s /usr/local/bin/pip /usr/bin/pip
-
-# Cập nhật pip
-RUN pip install --upgrade pip
-
-# Sao chép requirements.txt vào container
-COPY requirements.txt .
-
-# Cài đặt các thư viện từ requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Cài đặt paddlepaddle-gpu từ URL dành cho Linux
-RUN pip install --no-cache-dir paddlepaddle-gpu==2.4.2.post117 -f https://www.paddlepaddle.org.cn/whl/linux/mkl/avx/stable.html
-
-# Cài đặt torch với CUDA 11.7
-RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117
-
-# Đặt thư mục làm việc trong container
+# ========= 5) Làm việc tại /app =========
 WORKDIR /app
 
-# Sao chép mã nguồn vào container
-COPY . .
+# ========= 6) Copy tệp requirements và cài đặt thư viện theo layer cache =========
+COPY requirements.txt /app/requirements.txt
+RUN pip install --upgrade pip && pip install -r /app/requirements.txt
 
-# Mở cổng 80 để truy cập
-EXPOSE 80
+# ========= 7) Copy source =========
+# --chown đảm bảo code thuộc về user "app", own là owner
+COPY --chown=app:app . /app
 
-# Chạy ứng dụng khi container khởi động
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
+# - Thư mục upload mặc định (code đang dùng UPLOAD_DIRECTORY)
+ENV UPLOAD_DIRECTORY=/app/uploads
+
+# Tạo sẵn thư mục upload và gán quyền
+RUN install -d -o app -g app /app/uploads
+
+# Chạy dưới user thường
+USER app
+
+# ========= 8) Mở cổng ứng dụng =========
+EXPOSE 8000
+
+# ========= 8) Lệnh khởi động =========
+CMD ["fastapi", "run", "src/main.py", "--port", "8000"]
