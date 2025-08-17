@@ -107,7 +107,7 @@ class File_Controller :
         if not os.path.isfile(file_path):
             return {
                 "File_Name": file_name,
-                "Message": f"Tệp tin {file_name} không tồn tại trên máy chủ"
+                "Message": f"Tệp tin {file_path} không tồn tại trên máy chủ"
             }
 
         # Sử dụng FileResponse để gửi file cho client
