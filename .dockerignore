@@ -1,8 +1,25 @@
-.git
-__pycache__
+__pycache__/
 *.pyc
-.venv
-venv
-env
-build
-dist
+*.pyo
+*.pyd
+*.log
+*.sqlite
+*.db
+
+.env
+.venv/
+venv/
+env/
+
+.git/
+.gitignore
+.idea/
+.vscode/
+
+# build artifacts
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
