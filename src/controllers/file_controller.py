@@ -1,5 +1,7 @@
 from fastapi import HTTPException, status
 import shutil
+import mimetypes
+from pathlib import Path
 from fastapi.responses import FileResponse
 import os
 from pathlib import Path
@@ -99,19 +101,42 @@ class File_Controller :
         
     async def download_file(file_name: str):
         """
-        Tải tệp tin từ máy chủ về local
+        Tải tệp tin từ máy chủ về local (an toàn)  
         """
-        file_path = os.path.join(UPLOAD_DIRECTORY, file_name)
-    
-        # Kiểm tra nếu file tồn tại
-        if not os.path.isfile(file_path):
+        # Chuẩn hóa lại đường dẫn
+        normalized = file_name.replace("\\", "/").strip()
+
+        base_dir = Path(UPLOAD_DIRECTORY).resolve()
+        target = (base_dir / normalized).resolve()
+
+        # Chống path traversal
+        if base_dir not in target.parents and base_dir != target:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"message": "Đường dẫn không hợp lệ"}
+            )
+
+        # Kiểm tra file tồn tại
+        if not target.is_file():
             return {
                 "File_Name": file_name,
-                "Message": f"Tệp tin {file_path} không tồn tại trên máy chủ"
+                "Message": f"Tệp tin {target} không tồn tại trên máy chủ"
             }
 
-        # Sử dụng FileResponse để gửi file cho client
-        return FileResponse(path=file_path, filename=file_name)
+        # Dự đoán Content-Type theo phần mở rộng
+        content_type, _ = mimetypes.guess_type(target.name)
+        if content_type is None:
+            content_type = "application/octet-stream"  # fallback mặc định
+
+        # Trả file kèm header Content-Disposition
+        return FileResponse(
+            path=str(target),
+            media_type=content_type,
+            filename=target.name,  # => trình duyệt sẽ gợi ý tên file khi tải về
+            headers={
+                "Content-Disposition": f'attachment; filename="{target.name}"'
+            }
+        )
     
     async def delete_file(file_name, user_info):
         """
