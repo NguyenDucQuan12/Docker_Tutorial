@@ -24,14 +24,15 @@ async def list_files():
     """
     return await File_Controller.list_file()
 
-@router.get("/download/{file_name}")
-async def download_file(file_name: str):
+@router.get("/download/{file_path:path}", summary="Tải file từ server")
+async def download_file(file_path: str):
     """
     Tải tệp tin từ máy chủ về  
-    - **file_name**: Đường dẫn đến tệp tin  
-    Sử dụng api `list_file` để xem đường dẫn tệp tin, lưu ý sử dụng `\\\` để ngăn cách giữa các đường dẫn
+    - **file_path**: Đường dẫn đến tệp tin  
+    - Ví dụ: http://172.21.240.1:8000/file/download/Guest/DJI_0161.JPG  
+    Sử dụng api `list_file` để xem đường dẫn tệp tin, lưu ý sử dụng `/` để ngăn cách giữa các đường dẫn
     """
-    return await File_Controller.download_file(file_name)
+    return await File_Controller.download_file(file_path)
    
 @router.delete("/delete/{file_name}", summary="Xóa file")
 async def delete_file(file_name: str, user_info: UserAuth = Depends(required_token_user)):
