@@ -1,6 +1,6 @@
-from fastapi import APIRouter, File, UploadFile, Query, Depends, HTTPException, status
+from fastapi import APIRouter, File, UploadFile, Query, Depends
 from schemas.schemas import UserAuth
-from auth.oauth2 import get_info_user_via_token
+from auth.oauth2 import required_token_user
 from controllers.update_application_controller import UpdateApplicationController
 
 router = APIRouter(
@@ -16,8 +16,8 @@ async def upload_update(
     file: UploadFile = File(...),
     platform: str = Query(..., description="vd: win, mac, linux"),
     release_notes: str | None = Query(None, description="Ghi chú phát hành"),
-    checksum_sha256: str | None = Query(None, description="Checksum SHA-256 của file"),
-    user_info: UserAuth = Depends(get_info_user_via_token)
+    # checksum_sha256: str | None = Query(None, description="Checksum SHA-256 của file"),
+    user_info: UserAuth = Depends(required_token_user)
 ):
     return await UpdateApplicationController.upload_update(
         app_name=app_name,
@@ -25,7 +25,7 @@ async def upload_update(
         platform=platform,
         file=file,
         release_notes=release_notes,
-        checksum_sha256=checksum_sha256,
+        # checksum_sha256=checksum_sha256,
         user_info=user_info
     )
 
@@ -82,7 +82,7 @@ async def delete_version(
     app_name: str,
     platform: str,
     version: str,
-    user_info: UserAuth = Depends(get_info_user_via_token)
+    user_info: UserAuth = Depends(required_token_user)
 ):
     return await UpdateApplicationController.delete_version(
         app_name=app_name,
