@@ -47,10 +47,10 @@ RUN pip install --upgrade pip && pip install -r /app/requirements.txt
 COPY --chown=app:app . /app
 
 # - Thư mục upload mặc định (code đang dùng UPLOAD_DIRECTORY)
-ENV UPLOAD_DIRECTORY=/app/uploads
+# ENV UPLOAD_DIRECTORY=/app/uploads
 
 # Tạo sẵn thư mục upload và gán quyền
-RUN install -d -o app -g app /app/uploads /app/update_application
+RUN install -d -o app -g app /app/uploads /app/update_application /app/log
 
 # Chạy dưới user thường
 USER app
