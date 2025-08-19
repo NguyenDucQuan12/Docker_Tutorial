@@ -18,6 +18,7 @@ services:
 
       # === Thư mục gốc lưu file upload TRONG CONTAINER ===
       UPLOAD_DIRECTORY: "/app/uploads"
+      APP_UPDATE_DIR: "/app/update_application"
 
       # (tuỳ chọn) CORS
       # ALLOWED_ORIGINS: "http://localhost:3000,http://172.31.99.130"
@@ -30,6 +31,11 @@ services:
       - type: bind
         source: ./assets/file  # Đường dẫn trên máy chủ
         target: /app/uploads   # Đường dẫn trong container (Phải trùng với khai báo phía trên)
+
+      # Thư mục lưu file cập nhật phần mềm: host ./assets/update_application -> container /app/update_application
+      - type: bind
+        source: ./assets/update_application  # Đường dẫn trên máy chủ
+        target: /app/update_application   # Đường dẫn trong container (Phải trùng với khai báo phía trên)
 
     # === Tự khởi động lại nếu crash ngoài ý muốn (Không khởi động lại do người dùng chủ động stop) ===
     restart: unless-stopped
