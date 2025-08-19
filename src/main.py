@@ -1,19 +1,33 @@
 from fastapi import FastAPI# pip install "fastapi[standard]"
 import uvicorn
 import os
+from contextlib import asynccontextmanager
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from db.database import engine
 from db import models
 from api import user_login, file, health_check, update_application
+from middlerware import logger
 from auth import authentication
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Các câu lệnh được thực hiện khi khởi động (Dùng cho việc khởi tạo các mô hình AI)
+    print("Khởi tạo Fast API server")
+    yield
+    # Các câu lệnh sau yield được thực hiện khi kết thúc chương trình
+    print("Kết thúc Fast API server")
 
 # Khởi tại FastAPi
 app = FastAPI(
     docs_url="/myapi",  # Đặt đường dẫn Swagger UI thành "/myapi"
     redoc_url=None  # Tắt Redoc UI
 )
+
+# Đưa middleware vào app FastAPI
+app.add_middleware(BaseHTTPMiddleware, dispatch=logger.log_requests)
 
 # Thêm các endpoint ở đây
 app.include_router(user_login.router)
