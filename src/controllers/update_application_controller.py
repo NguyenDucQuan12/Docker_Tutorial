@@ -7,6 +7,7 @@ from datetime import datetime
 from fastapi.responses import FileResponse
 from fastapi import HTTPException, status
 from dotenv import load_dotenv
+from utils.constants import IP_ADDRESS_HOST, PORT_HOST, HIGH_PRIVILEGE_LIST
 
 load_dotenv()
 
@@ -16,15 +17,12 @@ Path(APP_UPDATE_DIR).mkdir(parents=True, exist_ok=True)
 # Tên file metadata kèm mỗi version
 METADATA_FILE = "release.json"
 
-# Tuỳ hệ thống của bạn
-HIGH_PRIVILEGE_LIST = {"Admin", "SuperAdmin", "Root"}
-
 def _safe_join(*parts: str) -> Path:
     """Ghép đường dẫn an toàn và chống traversal."""
     base = Path(APP_UPDATE_DIR).resolve()
     target = base.joinpath(*parts).resolve()
     if base != target and base not in target.parents:
-        raise HTTPException(status_code=400, detail={"message": "Đường dẫn không hợp lệ"})
+        raise HTTPException(status_code=400, detail={"Message": "Đường dẫn không hợp lệ"})
     return target
 
 def _normalize_platform(p: str) -> str:
@@ -60,16 +58,12 @@ class UpdateApplicationController:
         platform: str,
         file,
         release_notes: str | None,
-        checksum_sha256: str | None,
+        # checksum_sha256: str | None,
         user_info
     ):
         # Yêu cầu đăng nhập
         if not user_info:
             raise HTTPException(status_code=401, detail={"message": "Yêu cầu xác thực"})
-
-        # (tuỳ chọn) bắt buộc quyền cao khi phát hành
-        if user_info.get("Privilege") not in HIGH_PRIVILEGE_LIST:
-            raise HTTPException(status_code=403, detail={"message": "Bạn không có quyền upload bản cập nhật"})
 
         platform = _normalize_platform(platform)
         if not _is_semver(version):
@@ -90,38 +84,41 @@ class UpdateApplicationController:
                 buffer.write(chunk)
 
         # Tính/kiểm checksum nếu cần
-        actual_sha256 = _compute_sha256(dst)
-        if checksum_sha256 and checksum_sha256.lower() != actual_sha256.lower():
-            # Xoá file nếu checksum sai
-            try: dst.unlink()
-            except: pass
-            raise HTTPException(status_code=400, detail={"message": "Checksum không khớp"})
+        # actual_sha256 = _compute_sha256(dst)
+        # if checksum_sha256 and checksum_sha256.lower() != actual_sha256.lower():
+        #     # Xoá file nếu checksum sai
+        #     try: dst.unlink()
+        #     except: pass
+        #     raise HTTPException(status_code=400, detail={"message": "Checksum không khớp"})
 
         # Ghi metadata
         meta = {
-            "app": app_name,
-            "platform": platform,
-            "version": version,
-            "file": file.filename,
-            "size": dst.stat().st_size,
-            "sha256": actual_sha256,
-            "release_notes": release_notes or "",
-            "uploaded_by": user_info.get("Name"),
-            "uploaded_at": datetime.utcnow().isoformat() + "Z"
+            "App": app_name,
+            "Platform": platform,
+            "Version": version,
+            "File": file.filename,
+            "Size": dst.stat().st_size,
+            # "Sha256": actual_sha256,
+            "Release_notes": release_notes or "",
+            "Uploaded_by": user_info["Name"],
+            "Uploaded_at": datetime.now().isoformat()
         }
         with (target_dir / METADATA_FILE).open("w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
 
         return {
-            "message": "Upload thành công",
-            "metadata": meta
+            "Message": "Upload thành công",
+            "Metadata": meta
         }
 
     @staticmethod
     async def list_versions(app_name: str, platform: str | None):
+        """
+        Hiển thị danh sách các phiên bản đã tải lên của ứng dụng
+        """
         base = _safe_join(app_name)
         if not base.exists():
-            return {"app": app_name, "platform": platform, "versions": []}
+            return {"App": app_name, "Platform": platform, "Versions": []}
 
         results = []
         platforms = [platform] if platform else [p.name for p in base.iterdir() if p.is_dir()]
@@ -136,49 +133,63 @@ class UpdateApplicationController:
                         meta = json.load(f)
                     versions.append(meta)
             # sắp xếp theo semver giảm dần
-            versions.sort(key=lambda m: [int(x) for x in m["version"].split(".")], reverse=True)
-            results.append({"platform": _normalize_platform(p), "versions": versions})
+            versions.sort(key=lambda m: [int(x) for x in m["Version"].split(".")], reverse=True)
+            results.append({"Platform": _normalize_platform(p), "Versions": versions})
 
         return {"app": app_name, "results": results}
 
     @staticmethod
     async def check_update(app_name: str, current_version: str, platform: str):
+        """
+        Kiểm tra trên server có phiên bản mới hơn của ứng dụng không
+        """
+        # Kiểm tra định dạng phiên bản
         if not _is_semver(current_version):
-            raise HTTPException(status_code=400, detail={"message": "current_version phải là semver"})
+            raise HTTPException(status_code=400, detail={"Message": "current_version định dạng là x.x.x"})
 
+        # Kiểm tra xem có dữ liệu cho nền tảng này không
         pdir = _safe_join(app_name, _normalize_platform(platform))
         if not pdir.exists():
-            return {"update_available": False, "reason": "Không có dữ liệu cho platform này"}
+            return {
+                "Update_available": False,
+                "Reason": f"Không có dữ liệu ứng dụng cho nền tảng {platform}"}
 
-        # tìm phiên bản lớn nhất
+        # Tìm phiên bản lớn nhất trong thư mục
         candidates = [d.name for d in pdir.iterdir() if d.is_dir() and _is_semver(d.name)]
         if not candidates:
-            return {"update_available": False, "reason": "Chưa có phiên bản nào"}
+            return {
+                "Update_available": False,
+                "Reason": f"Chưa có phiên bản nào cho ứng dụng {app_name}"}
 
+        # Lấy phiên bản mới nhất và so sánh hai phiên bản, nếu phiên bản ở server lớn hơn thì trả về True
         latest = sorted(candidates, key=lambda s: [int(x) for x in s.split(".")], reverse=True)[0]
         cmp = _compare_semver(current_version, latest)
 
+        # Đọc thông tin ứng dụng từ server
         with (pdir / latest / METADATA_FILE).open("r", encoding="utf-8") as f:
             meta = json.load(f)
 
         # URL tải về: trỏ tới endpoint download
         # client chỉ cần GET /update_application/download/<app>/<platform>/<version>/<file>
-        download_url = f"/update_application/download/{app_name}/{_normalize_platform(platform)}/{latest}/{meta['file']}"
+        download_url = f"http://{IP_ADDRESS_HOST}:{PORT_HOST}/update_application/download/{app_name}/{_normalize_platform(platform)}/{latest}/{meta['File']}"
 
         return {
-            "app": app_name,
-            "platform": _normalize_platform(platform),
-            "current_version": current_version,
-            "latest_version": latest,
-            "update_available": cmp < 0,
-            "download_url": download_url,
-            "size": meta.get("size"),
-            "sha256": meta.get("sha256"),
-            "release_notes": meta.get("release_notes", "")
+            "App": app_name,
+            "Platform": _normalize_platform(platform),
+            "Current_version": current_version,
+            "Latest_version": latest,
+            "Update_available": cmp < 0,
+            "Download_url": download_url,
+            "Size": meta.get("Size"),
+            # "Sha256": meta.get("sha256"),
+            "Release_notes": meta.get("Release_notes", "")
         }
 
     @staticmethod
     async def download_update(app_name: str, platform: str, version: str, file_path: str):
+        """
+        Tải về ứng dụng từ máy chủ
+        """
         # chuẩn hoá & chống traversal
         safe = file_path.replace("\\", "/").strip()
         target = _safe_join(app_name, _normalize_platform(platform), version, safe)
@@ -203,6 +214,9 @@ class UpdateApplicationController:
 
     @staticmethod
     async def delete_version(app_name: str, platform: str, version: str, user_info):
+        """
+        Xóa một phiên bản ứng dụng trên máy chủ
+        """
         if not user_info:
             raise HTTPException(status_code=401, detail={"message": "Yêu cầu xác thực"})
 
@@ -216,4 +230,4 @@ class UpdateApplicationController:
         # Xoá toàn bộ thư mục phiên bản
         import shutil
         shutil.rmtree(vdir)
-        return {"message": f"Đã xoá {app_name}/{platform}/{version}"}
+        return {"Message": f"Đã xoá {app_name}/{platform}/{version}"}
