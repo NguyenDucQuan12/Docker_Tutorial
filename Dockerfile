@@ -50,7 +50,7 @@ COPY --chown=app:app . /app
 ENV UPLOAD_DIRECTORY=/app/uploads
 
 # Tạo sẵn thư mục upload và gán quyền
-RUN install -d -o app -g app /app/uploads
+RUN install -d -o app -g app /app/uploads /app/update_application
 
 # Chạy dưới user thường
 USER app
