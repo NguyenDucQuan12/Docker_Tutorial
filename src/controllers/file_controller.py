@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from datetime import datetime
+from log.system_log import system_logger
 
 from utils.constants import *
 
@@ -54,12 +55,18 @@ class File_Controller :
             with open(file_location, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
 
+            # Ghi log lại
+            system_logger.info(f"Người dùng {folder_name} đã tải lên tệp tin: {file_location}")
+
             # Trả về thông tin khi thành công
             return {
                 "File_Name": file.filename,
                 "Message": "Tải tệp tin thành công"}
 
         except Exception as e:
+            # Ghi log lại
+            system_logger.error(f"Lỗi khi người dùng {user_info["Name"]} tải lên tệp tin {file.filename}: {str(e)}")
+
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
@@ -75,7 +82,7 @@ class File_Controller :
             # Liệt kê tất cả các thư mục và file trong thư mục gốc
             directories = [d for d in os.listdir(UPLOAD_DIRECTORY) if os.path.isdir(os.path.join(UPLOAD_DIRECTORY, d))]
             if not directories:
-                return {"message": "Không có thư mục nào trong thư mục gốc"}
+                return {"Message": "Không có thư mục nào trong thư mục gốc"}
 
             # Lưu trữ kết quả danh sách file theo từng thư mục
             result = {}
@@ -93,6 +100,9 @@ class File_Controller :
             return {"Folder": result}
 
         except Exception as e:
+            # Ghi log lại
+            system_logger.error(f"Lỗi khi gọi api xem danh sách tập tin trong thư mục {UPLOAD_DIRECTORY}: {str(e)}")
+
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                 detail={
@@ -103,40 +113,53 @@ class File_Controller :
         """
         Tải tệp tin từ máy chủ về local (an toàn)  
         """
-        # Chuẩn hóa lại đường dẫn
-        normalized = file_name.replace("\\", "/").strip()
+        try:
+            # Chuẩn hóa lại đường dẫn
+            normalized = file_name.replace("\\", "/").strip()
 
-        base_dir = Path(UPLOAD_DIRECTORY).resolve()
-        target = (base_dir / normalized).resolve()
+            base_dir = Path(UPLOAD_DIRECTORY).resolve()
+            target = (base_dir / normalized).resolve()
 
-        # Chống path traversal
-        if base_dir not in target.parents and base_dir != target:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": "Đường dẫn không hợp lệ"}
+            # Chống path traversal
+            if base_dir not in target.parents and base_dir != target:
+                # Ghi log lại
+                system_logger.error(f"Người dùng cung cấp đường dẫn tới tệp tin không hợp lệ: {target}")
+                return {"Message": "Đường dẫn tới tệp tin không hợp lệ"}
+                
+
+            # Kiểm tra file tồn tại
+            if not target.is_file():
+                # Ghi log lại
+                system_logger.error(f"Không tồn tại tệp tin trên máy chủ: {target}")
+
+                return {
+                    "File_Name": file_name,
+                    "Message": f"Tệp tin {file_name} không tồn tại trên máy chủ"
+                }
+
+            # Dự đoán Content-Type theo phần mở rộng
+            content_type, _ = mimetypes.guess_type(target.name)
+            if content_type is None:
+                content_type = "application/octet-stream"  # fallback mặc định
+
+            # Trả file kèm header Content-Disposition
+            return FileResponse(
+                path=str(target),
+                media_type=content_type,
+                filename=target.name,  # => trình duyệt sẽ gợi ý tên file khi tải về
+                headers={
+                    "Content-Disposition": f'attachment; filename="{target.name}"'
+                }
             )
+        except Exception as e:
+            # Ghi log
+            system_logger.error(f"Lỗi khi gọi api xem danh sách tập tin trong thư mục {UPLOAD_DIRECTORY}: {str(e)}")
 
-        # Kiểm tra file tồn tại
-        if not target.is_file():
-            return {
-                "File_Name": file_name,
-                "Message": f"Tệp tin {target} không tồn tại trên máy chủ"
-            }
-
-        # Dự đoán Content-Type theo phần mở rộng
-        content_type, _ = mimetypes.guess_type(target.name)
-        if content_type is None:
-            content_type = "application/octet-stream"  # fallback mặc định
-
-        # Trả file kèm header Content-Disposition
-        return FileResponse(
-            path=str(target),
-            media_type=content_type,
-            filename=target.name,  # => trình duyệt sẽ gợi ý tên file khi tải về
-            headers={
-                "Content-Disposition": f'attachment; filename="{target.name}"'
-            }
-        )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                detail={
+                    "message": f"Lỗi khi tải tệp tin từ máy chủ: {str(e)}"
+                })
     
     async def delete_file(file_name, user_info):
         """
@@ -145,12 +168,12 @@ class File_Controller :
         # Kiểm tra xem có quyền thao tác không
         if not user_info:
             return {
-                "message": "Vui lòng xác thực người dùng trước khi thao tác"
+                "Message": "Vui lòng xác thực người dùng trước khi thao tác"
             }
         
         if user_info["Privilege"] not in HIGH_PRIVILEGE_LIST:
             return {
-                "message": "Bạn không có quyền xóa tệp tin trên máy chủ"
+                "Message": "Bạn không có quyền xóa tệp tin trên máy chủ"
             }
         
         # Nối chuỗi lại thành đường dẫn đến tệp tin
@@ -158,19 +181,25 @@ class File_Controller :
 
         # Kiểm tra tệp tin có tồn tại trên server không
         if not os.path.isfile(file_path):
+            # Ghi log lại
+            system_logger.error(f"Người dùng {user_info["Name"]} xóa tệp tin trên máy chủ không hợp lệ: {file_path}")
             return {
-                "message": f"Tệp tin {file_name} không tồn tại trên máy chủ"
+                "Message": f"Tệp tin {file_name} không tồn tại trên máy chủ"
             }
         
         # Tiến hành xóa tệp tin
         try:
             os.remove(file_path)
+            # Ghi log lại
+            system_logger.warning(f"Người dùng {user_info["Name"]} đã xóa tệp tin: {file_path}")
             return {
-                "operator": user_info["Name"],
-                "message": f"Đã xóa tệp tin {file_name} thành công"
+                "Operator": user_info["Name"],
+                "Message": f"Đã xóa tệp tin {file_name} thành công"
             }
         
         except Exception as e:
+            # Ghi log lại
+            system_logger.error(f"Gặp lỗi khi xóa tệp tin {file_name}: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                 detail={
@@ -187,25 +216,29 @@ class File_Controller :
         # Kiểm tra tệp gốc có tồn tại không
         if not os.path.isfile(old_path):
             return{
-                "message": f"Tệp tin {old_name} không tồn tại"
+                "Message": f"Tệp tin {old_name} không tồn tại"
             }
         
         if os.path.exists(new_path):
             return {
-                "message": f"Tên mới đã được sử dụng cho tệp tin khác, hãy chọn lại tên khác."
+                "Message": f"Tên mới đã được sử dụng cho tệp tin khác, hãy chọn lại tên khác."
             }
         
         try:
             os.rename(old_path, new_path)
+            # Ghi log lại
+            system_logger.info(f"Tệp tin {old_path} đã được đổi thành: {new_path}")
             return {
-                    "message": f"Đã đổi tên file {old_name} thành {new_name} thành công"
+                    "Message": f"Đã đổi tên file {old_name} thành {new_name} thành công"
                 }
         
         except Exception as e:
+            # Ghi log lại
+            system_logger.error(f"Người dùng đổi tên tệp tin {old_path} gặp lỗi: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
-                    "message": f"Lỗi khi đổi tên file: {str(e)}"
+                    "Message": f"Lỗi khi đổi tên file {old_name}: {str(e)}"
                 })
 
     async def file_info(file_name: str):
@@ -216,7 +249,7 @@ class File_Controller :
         # Kiểm tra tệp tin có tồn tại hay không
         if not os.path.isfile(file_path):
             return{
-                "message": f"Tệp tin {file_name} không tồn tại"
+                "Message": f"Tệp tin {file_name} không tồn tại"
             }
         
         try:
@@ -237,6 +270,8 @@ class File_Controller :
 
             return info
         except Exception as e:
+            # Ghi log lại
+            system_logger.error(f"Xảy ra lỗi khi truy vấn thông tin tệp tin {file_name}: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                 detail={
