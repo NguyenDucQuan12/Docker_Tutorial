@@ -27,8 +27,11 @@ services:
 
       # (tuỳ chọn) CORS
       # ALLOWED_ORIGINS: "http://localhost:3000,http://172.31.99.130"
+    
+    # Mở port để kết nối đến bên ngoài (8000:8000) theo thứ tự PORT để các thiết bị khác truy cập: PORT mở trong code và ở container
     ports:
-      - "8000:8000"
+      # - "8000:8000"
+      - "${PORT_HOST}:8000"
 
     # === Bind mount các thư mục cần ghi/đọc ===
     volumes:
