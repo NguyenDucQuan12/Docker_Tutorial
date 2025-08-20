@@ -14,7 +14,7 @@ load_dotenv()  # Tự động tìm và nạp file .env ở thư mục hiện t�
 
 
 # Đường dẫn thư mục lưu trữ file
-UPLOAD_DIRECTORY = os.getenv("UPLOAD_DIRECTORY")
+UPLOAD_DIRECTORY = os.getenv("UPLOAD_DIRECTORY", "assets/file")
 
 # Tạo thư mục nếu chưa có
 Path(UPLOAD_DIRECTORY).mkdir(parents=True, exist_ok=True)

@@ -17,9 +17,9 @@ load_dotenv()  # Tự động tìm và nạp file .env ở thư mục hiện t�
 # mở terminal và chạy lệnh: openssl rand -hex 32
 # Khóa này chỉ dành cho việc phát triển API, không ai khác có thể sử dụng
 # Chỉ những bên có SECRET_KEY mới có thể xác thực và giải mã token.
-SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM =  os.getenv("ALGORITHM")
-ACCESS_TOKEN_EXPIRE_MINUTES = 15
+SECRET_KEY = os.getenv("SECRET_KEY", "77407c7339a6c00544e51af1101c4abb4aea2a31157ca5f7dfd87da02a628107") # Nếu ko tìm thấy giá trị trong tệp .env thì lấy giá trị mặc định này
+ALGORITHM =  os.getenv("ALGORITHM", "HS256")  # Nếu ko tìm thấy thuật toán mã hóa trong .env thì mặc định sử dụng kiểu mã hóa HS256
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15")) # Nếu ko có thời gian hết hạn thì mặc định để 15 phút tồn tại cho token
 
 # Chỉ định nơi lấy token bằng hàm login
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")

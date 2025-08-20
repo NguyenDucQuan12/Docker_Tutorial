@@ -7,11 +7,15 @@ from datetime import datetime
 from fastapi.responses import FileResponse
 from fastapi import HTTPException, status
 from dotenv import load_dotenv
-from utils.constants import IP_ADDRESS_HOST, PORT_HOST, HIGH_PRIVILEGE_LIST
+from utils.constants import HIGH_PRIVILEGE_LIST
 
 load_dotenv()
 
-APP_UPDATE_DIR = os.getenv("APP_UPDATE_DIR", "/app/updates")
+# Lấy dữ liệu từ .env, nếu ko có thì hiển thì giá trị mặc định
+IP_ADDRESS_HOST = os.getenv("IP_ADDRESS_HOST", "NOT_FOUND")
+PORT_HOST = os.getenv("PORT_HOST", "NOT_FOUND")
+
+APP_UPDATE_DIR = os.getenv("APP_UPDATE_DIR", "assets/update_application")
 Path(APP_UPDATE_DIR).mkdir(parents=True, exist_ok=True)
 
 # Tên file metadata kèm mỗi version
