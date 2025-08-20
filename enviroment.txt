@@ -1,0 +1,26 @@
+# Tạo tệp `.env` với các giá trị bên dưới như sau:  
+# KEY: VALUE
+# KEY là từ khóa để truy cập từ các tệp python  
+# VALUE là giá trị mà ta nhận được khi truy cập các key. VALUE khi được gọi sẽ mặc định thêm chuỗi "" vào, nên khai báo ở dưới đây ko sử dụng chuỗi nữa.  
+# SECRET_KEY: "123458asdarw8dg4d64gd8rgdg4dg4rd8g4d8gr4d" (KHÔNG SỬ DỤNG KIỂU NÀY)  
+# SECRET_KEY: 123458asdarw8dg4d64gd8rgdg4dg4rd8g4d8gr4d (HÃY SỬ DỤNG KIỂU NÀY)  
+
+# Cấu hình mã hóa token
+SECRET_KEY = Một mã hóa bảo mật 64 ký tự ngẫu nhiên
+ALGORITHM = Thuật toán mã hóa (Có thể sử dụng HS256) (ALGORITHM = HS256)
+ACCESS_TOKEN_EXPIRE_MINUTES = Thời gian tồn tại của token trong bao lâu, đơn vị là phút (15: là 15 phút)
+
+# Cấu hình CSDL
+DB_USER = Tên đăng nhập cho SQL Server
+DB_PASSWORD = Mật khẩu đăng nhập cho tài khoản SQL Server
+DB_NAME = Tên CSDL cần truy cập trong SQL Server
+
+# Cấu hình với các tệp tin
+UPLOAD_DIRECTORY = assets/file
+APP_UPDATE_DIR = assets/update_application
+API_LOG_DIRECTORY = log/api_log
+SYSTEM_LOG_DIRECTORY = log/system_log
+
+# Cấu hình HOST
+IP_ADDRESS_HOST = Địa chỉ IP mà máy chủ đang chạy  
+PORT_HOST = PORT sẽ mở truy cập api
