@@ -54,7 +54,7 @@ RUN ln -sf /usr/share/zoneinfo/Asia/Ho_Chi_Minh /etc/localtime \
 # ENV UPLOAD_DIRECTORY=/app/uploads
 
 # Tạo sẵn thư mục upload và gán quyền
-RUN install -d -o app -g app /app/uploads /app/update_application /app/log
+RUN install -d -o app -g app /app/uploads /app/update_application /app/log/api_log /app/log/system_log
 
 # Chạy dưới user thường
 USER app

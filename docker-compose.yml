@@ -22,7 +22,8 @@ services:
       # === Thư mục gốc lưu file upload TRONG CONTAINER ===
       UPLOAD_DIRECTORY: "/app/uploads"
       APP_UPDATE_DIR: "/app/update_application"
-      LOG_DIRECTORY: "/app/log"
+      API_LOG_DIRECTORY: "/app/log/api_log"
+      SYSTEM_LOG_DIRECTORY: "/app/log/system_log"
 
       # (tuỳ chọn) CORS
       # ALLOWED_ORIGINS: "http://localhost:3000,http://172.31.99.130"
@@ -41,9 +42,15 @@ services:
         source: ./assets/update_application  # Đường dẫn trên máy chủ
         target: /app/update_application   # Đường dẫn trong container (Phải trùng với khai báo phía trên)
 
+      # Thư mục chứa log khi gọi api
       - type: bind
-        source: ./log  # Đường dẫn trên máy chủ
-        target: /app/log # Đường dẫn trong container (Phải trùng với khai báo phía trên)
+        source: ./log/api_log  # Đường dẫn trên máy chủ
+        target: /app/log/api_log # Đường dẫn trong container (Phải trùng với khai báo phía trên)
+
+      # Thư mục chứa log hệ thống
+      - type: bind
+        source: ./log/system_log  # Đường dẫn trên máy chủ
+        target: /app/log/system_log # Đường dẫn trong container (Phải trùng với khai báo phía trên)
 
     # === Tự khởi động lại nếu crash ngoài ý muốn (Không khởi động lại do người dùng chủ động stop) ===
     restart: unless-stopped
