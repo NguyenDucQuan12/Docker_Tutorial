@@ -13,7 +13,7 @@ load_dotenv()  # Tự động tìm và nạp file .env ở thư mục hiện t�
 
 
 # Đường dẫn thư mục lưu trữ file log
-LOG_DIRECTORY = os.getenv("LOG_DIRECTORY")
+LOG_DIRECTORY = os.getenv("LOG_DIRECTORY", "log")
 
 # Tạo thư mục nếu chưa có
 Path(LOG_DIRECTORY).mkdir(parents=True, exist_ok=True)
@@ -22,17 +22,17 @@ Path(LOG_DIRECTORY).mkdir(parents=True, exist_ok=True)
 class CustomFilter(logging.Filter):
     def filter(self, record):
         # Các trường sẽ có trong log, nếu ko có giá trị thì mặc định là "-"
-        record.ip = getattr(record, "ip", "-")
-        record.hostname = getattr(record, "hostname", "-")
-        record.api_name = getattr(record, "api_name", "-")
-        record.params = getattr(record, "params", "-")
-        record.result = getattr(record, "result", "-")
-        record.method = getattr(record, "method", "-")
-        record.status = getattr(record, "status", "-")
-        record.duration_ms = getattr(record, "duration_ms", "-")
-        record.user_agent = getattr(record, "user_agent", "-")
-        record.correlation_id = getattr(record, "correlation_id", "-")
-        record.request_body = getattr(record, "request_body", "-")
+        record.ip = getattr(record, "ip", "None")
+        record.hostname = getattr(record, "hostname", "None")
+        record.api_name = getattr(record, "api_name", "None")
+        record.params = getattr(record, "params", "None")
+        record.result = getattr(record, "result", "None")
+        record.method = getattr(record, "method", "None")
+        record.status = getattr(record, "status", "None")
+        record.duration_ms = getattr(record, "duration_ms", "None")
+        record.user_agent = getattr(record, "user_agent", "None")
+        record.correlation_id = getattr(record, "correlation_id", "None")
+        record.request_body = getattr(record, "request_body", "None")
         return True
 
 def _today_str():
@@ -96,8 +96,9 @@ def _remove_old_logs(logs_root= LOG_DIRECTORY, max_days=30):
 # Formatter: Tạo log theo các trường thông tin yêu cầu ban đầu
 _formatter = logging.Formatter(
     "%(asctime)s - %(hostname)s - %(ip)s - %(method)s %(api_name)s - "
-    "status=%(status)s - duration=%(duration_ms)s ms - cid=%(correlation_id)s - ua=%(user_agent)s - "
-    "params=%(params)s - request_body=%(request_body)s - result=%(result)s"
+    "status: %(status)s - duration: %(duration_ms)s ms - cid: %(correlation_id)s - ua: %(user_agent)s - "
+    "params: %(params)s - request_body: %(request_body)s - result: %(result)s",
+    datefmt="%d-%m-%Y %H:%M:%S",  # Định dạng thời gian (ngày-tháng-năm giờ:phút:giây)
 )
 
 # Logger ứng dụng
