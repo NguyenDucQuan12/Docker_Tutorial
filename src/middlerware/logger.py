@@ -6,7 +6,7 @@ from typing import Dict
 from fastapi import Request
 from fastapi.responses import Response
 from starlette.concurrency import iterate_in_threadpool
-from log.logging_config import logger
+from log.api_log import logger
 
 # Các đường dẫn ít giá trị (giảm ồn). Có thể bỏ /docs,/redoc nếu bạn muốn log cả trang docs.
 EXCLUDED_PATHS = {"/redoc", "/docs", "/openapi.json"}
