@@ -10,6 +10,16 @@ from db import models
 from api import user_login, file, health_check, update_application
 from middlerware import logger
 from auth import authentication
+from dotenv import load_dotenv
+
+load_dotenv()  # Tự động tìm và nạp file .env ở thư mục hiện tại
+
+
+# Đường dẫn thư mục lưu trữ file
+PORT_HOST = os.getenv("PORT_HOST", "8000")
+
+# Ép kiểu để port là số nguyên
+PORT = int(PORT_HOST)
 
 
 @asynccontextmanager
@@ -66,7 +76,7 @@ app.add_middleware(
 
 if __name__ == "__main__":
     #Thêm tham số log_config= "logs\\logging_config.json" để chuyển các log của uvicorn vào tệp
-    uvicorn.run("__main__:app", host="0.0.0.0", port=8000)  # log_config= "logs\\logging_config.json"
+    uvicorn.run("__main__:app", host="0.0.0.0", port=PORT)  # log_config= "logs\\logging_config.json"
 
     # Hoặc gõ trực tiếp lệnh `fastapi dev src/main.py` để vào chế độ developer
     # Hoặc gõ trực tiếp lệnh `fastapi run src/main.py` để vào chế độ lấy máy chạy làm server
