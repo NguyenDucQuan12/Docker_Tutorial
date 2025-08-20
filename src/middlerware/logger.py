@@ -6,12 +6,12 @@ from typing import Dict
 from fastapi import Request
 from fastapi.responses import Response
 from starlette.concurrency import iterate_in_threadpool
-
-# Lấy logger ứng dụng đã được cấu hình ở module logging_config_threaded (xem phần 2)
 from log.logging_config import logger
 
 # Các đường dẫn ít giá trị (giảm ồn). Có thể bỏ /docs,/redoc nếu bạn muốn log cả trang docs.
 EXCLUDED_PATHS = {"/redoc", "/docs", "/openapi.json"}
+
+HEALTH_PATHS = {"/healthz", "/readyz"}
 
 # Khóa nhạy cảm cần che khi log request params/body
 SENSITIVE_KEYS = {"password", "token", "authorization", "apikey", "secret"}
@@ -84,6 +84,10 @@ async def log_requests(request: Request, call_next):
     except Exception:
         # Không để lỗi logging ảnh hưởng xử lý request
         pass
+
+    # Không ghi log đối với các đường dẫn health check
+    if path in HEALTH_PATHS:
+        return await call_next(request)
 
     # Bỏ qua những path ít giá trị để giảm ồn (nhưng vẫn đo duration)
     if path in EXCLUDED_PATHS:
