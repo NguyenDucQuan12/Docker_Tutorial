@@ -7,6 +7,8 @@ import os
 
 load_dotenv()  # Tự động tìm và nạp file .env ở thư mục hiện tại
 
+UPLOAD_DIRECTORY = os.getenv("UPLOAD_DIRECTORY", "/app/uploads")
+
 # Khai báo router với tiền tố cho các endpoint là: /user_login/xxx
 router = APIRouter(
     tags= ["Health"]
@@ -28,7 +30,7 @@ def readyz():
     """
     checks = {}
 
-    # 1) Kiểm tra DB
+    # Kiểm tra DB
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
@@ -36,11 +38,10 @@ def readyz():
     except Exception as e:
         checks["db"] = f"error: {e.__class__.__name__}"
 
-    # 2) Kiểm tra quyền ghi thư mục upload
-    upload_root = os.getenv("UPLOAD_DIRECTORY") or "/app/uploads"
+    # Kiểm tra quyền ghi thư mục upload
     try:
-        os.makedirs(upload_root, exist_ok=True)
-        probe_file = os.path.join(upload_root, ".readyz.tmp")
+        os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
+        probe_file = os.path.join(UPLOAD_DIRECTORY, ".readyz.tmp")
         with open(probe_file, "w", encoding="utf-8") as f:
             f.write("ok")
         os.remove(probe_file)
