@@ -6,13 +6,16 @@ services:
       context: .
     image: fastapi-app:0.0.1
     container_name: fastapi-app
+    # Nạp tệp biến môi trường vào docker
+    env_file:
+      - .env
 
     # === Biến môi trường cho app ===
     environment:
 
       # === SQL Server trên host ===
       DB_HOST: "host.docker.internal"   # Win/mac: OK; Linux cần extra_hosts bên dưới
-      DB_USER: ${DB_USER}
+      DB_USER: ${DB_USER}   # Lấy trực tiếp từ tệp .env mà ko cần nạp
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME}
 
