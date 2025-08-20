@@ -46,6 +46,10 @@ RUN pip install --upgrade pip && pip install -r /app/requirements.txt
 # --chown đảm bảo code thuộc về user "app", own là owner
 COPY --chown=app:app . /app
 
+# Chuyển đổi thời gian trong container về múi giờ Vietnam (UTC+7)
+RUN ln -sf /usr/share/zoneinfo/Asia/Ho_Chi_Minh /etc/localtime \
+    && echo "Asia/Ho_Chi_Minh" > /etc/timezone
+
 # - Thư mục upload mặc định (code đang dùng UPLOAD_DIRECTORY)
 # ENV UPLOAD_DIRECTORY=/app/uploads
 
