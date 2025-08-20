@@ -16,7 +16,7 @@ def get_my_token ():
         url= url_get_token,
         data= data
     )
-    my_token = response.json().get("access_token")
+    my_token = response.json().get("Access_token")
 
     return my_token
 

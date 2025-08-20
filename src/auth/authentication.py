@@ -5,6 +5,7 @@ from db.database import get_db
 from db.models import DbUser_Login
 from utils.hash import Hash
 from auth import oauth2
+from log.system_log import system_logger
 
 
 router = APIRouter(
@@ -75,7 +76,10 @@ def login(request: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(
         "Privilege": user.Privilege
     })
 
+    # Ghi log lại
+    system_logger.info(f"Người dùng {request.username} truy vấn token")
+
     return {
-        "access_token": access_token,
-        "token_type": "Bearer", # token tiêu chuẩn: bearer
+        "Access_token": access_token,
+        "Token_type": "Bearer", # token tiêu chuẩn: bearer
     }

@@ -74,6 +74,3 @@ log_handler.setFormatter(_formatter)
 system_logger = logging.getLogger("system_logger")
 system_logger.setLevel(logging.INFO)
 system_logger.addHandler(log_handler)
-
-# Ghi log mẫu
-system_logger.info("System started")

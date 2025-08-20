@@ -19,7 +19,7 @@ def upload_file(file_path):
         url= url_get_token,
         data= data
     )
-    my_token = response.json().get("access_token")
+    my_token = response.json().get("Access_token")
 
     print(my_token)
 
@@ -84,7 +84,7 @@ def delete_file(file_name):
         url= url_get_token,
         data= data
     )
-    my_token = response.json().get("access_token")
+    my_token = response.json().get("Access_token")
 
     # Thêm headers( token xác thực)
     headers = {

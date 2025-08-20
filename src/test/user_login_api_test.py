@@ -13,7 +13,7 @@ response = requests.post(
     url= url_get_token,
     data= data
 )
-my_token = response.json().get("access_token")
+my_token = response.json().get("Access_token")
 
 # print(my_token)
 

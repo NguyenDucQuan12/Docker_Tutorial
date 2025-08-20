@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi import HTTPException, status
 from dotenv import load_dotenv
 from utils.constants import HIGH_PRIVILEGE_LIST
+from log.system_log import system_logger
 
 load_dotenv()
 
@@ -67,11 +68,11 @@ class UpdateApplicationController:
     ):
         # Yêu cầu đăng nhập
         if not user_info:
-            raise HTTPException(status_code=401, detail={"message": "Yêu cầu xác thực"})
+            raise HTTPException(status_code=401, detail={"Message": "Yêu cầu xác thực"})
 
         platform = _normalize_platform(platform)
         if not _is_semver(version):
-            raise HTTPException(status_code=400, detail={"message": "Version phải theo dạng semver: MAJOR.MINOR.PATCH"})
+            raise HTTPException(status_code=400, detail={"Message": "Version phải theo dạng semver: MAJOR.MINOR.PATCH"})
 
         # Thư mục đích: /APP_UPDATE_DIR/<app>/<platform>/<version>/
         target_dir = _safe_join(app_name, platform, version)
@@ -81,7 +82,7 @@ class UpdateApplicationController:
         dst = target_dir / file.filename
         if dst.exists():
             # tránh ghi đè
-            raise HTTPException(status_code=409, detail={"message": f"File {file.filename} đã tồn tại"})
+            raise HTTPException(status_code=409, detail={"Message": f"File {file.filename} đã tồn tại"})
 
         with dst.open("wb") as buffer:
             for chunk in iter(lambda: file.file.read(1024 * 1024), b""):
@@ -109,6 +110,9 @@ class UpdateApplicationController:
         }
         with (target_dir / METADATA_FILE).open("w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
+
+        # Ghi log lại
+        system_logger.info(f"Người dùng {user_info["Name"]} tải lên phần mềm {app_name} cho nền tảng {platform} với phiên bản: {version}")
 
         return {
             "Message": "Upload thành công",
@@ -140,7 +144,7 @@ class UpdateApplicationController:
             versions.sort(key=lambda m: [int(x) for x in m["Version"].split(".")], reverse=True)
             results.append({"Platform": _normalize_platform(p), "Versions": versions})
 
-        return {"app": app_name, "results": results}
+        return {"App": app_name, "Results": results}
 
     @staticmethod
     async def check_update(app_name: str, current_version: str, platform: str):
@@ -154,16 +158,18 @@ class UpdateApplicationController:
         # Kiểm tra xem có dữ liệu cho nền tảng này không
         pdir = _safe_join(app_name, _normalize_platform(platform))
         if not pdir.exists():
+            # Ghi log lại
+            system_logger.warning(f"Không tồn tại tệp tin {app_name} ở thư mục: {pdir}")
             return {
                 "Update_available": False,
-                "Reason": f"Không có dữ liệu ứng dụng cho nền tảng {platform}"}
+                "Message": f"Không có dữ liệu ứng dụng cho nền tảng {platform}"}
 
         # Tìm phiên bản lớn nhất trong thư mục
         candidates = [d.name for d in pdir.iterdir() if d.is_dir() and _is_semver(d.name)]
         if not candidates:
             return {
                 "Update_available": False,
-                "Reason": f"Chưa có phiên bản nào cho ứng dụng {app_name}"}
+                "Message": f"Chưa có phiên bản nào cho ứng dụng {app_name}"}
 
         # Lấy phiên bản mới nhất và so sánh hai phiên bản, nếu phiên bản ở server lớn hơn thì trả về True
         latest = sorted(candidates, key=lambda s: [int(x) for x in s.split(".")], reverse=True)[0]
@@ -176,6 +182,9 @@ class UpdateApplicationController:
         # URL tải về: trỏ tới endpoint download
         # client chỉ cần GET /update_application/download/<app>/<platform>/<version>/<file>
         download_url = f"http://{IP_ADDRESS_HOST}:{PORT_HOST}/update_application/download/{app_name}/{_normalize_platform(platform)}/{latest}/{meta['File']}"
+
+        # Ghi log lại
+        system_logger.info(f"Kiểm tra phiên bản mới của phần mềm {app_name} nền tảng {platform}")
 
         return {
             "App": app_name,
@@ -199,12 +208,17 @@ class UpdateApplicationController:
         target = _safe_join(app_name, _normalize_platform(platform), version, safe)
 
         if not target.is_file():
-            return {"message": f"File {target} không tồn tại"}
+            # Ghi log lại
+            system_logger.error(f"Người dùng cung cấp đường dẫn tới tệp tin không hợp lệ: {target}")
+            return {"Message": f"File {app_name} không tồn tại"}
 
         # Content-Type theo đuôi file
         content_type, _ = mimetypes.guess_type(target.name)
         if content_type is None:
             content_type = "application/octet-stream"
+        
+        # Ghi log lại
+        system_logger.info(f"Người dùng tải về tệp tin: {target}")
 
         return FileResponse(
             path=str(target),
@@ -222,16 +236,20 @@ class UpdateApplicationController:
         Xóa một phiên bản ứng dụng trên máy chủ
         """
         if not user_info:
-            raise HTTPException(status_code=401, detail={"message": "Yêu cầu xác thực"})
+            raise HTTPException(status_code=401, detail={"Message": "Yêu cầu xác thực"})
 
         if user_info.get("Privilege") not in HIGH_PRIVILEGE_LIST:
-            raise HTTPException(status_code=403, detail={"message": "Bạn không có quyền xoá phiên bản"})
+            raise HTTPException(status_code=403, detail={"Message": "Bạn không có quyền xoá phiên bản"})
 
         vdir = _safe_join(app_name, _normalize_platform(platform), version)
         if not vdir.exists():
-            return {"message": "Phiên bản không tồn tại"}
+            # Ghi log lại
+            system_logger.error(f"Người dùng cung cấp đường dẫn tới tệp tin không hợp lệ: {vdir}")
+            return {"Message": f"Phần mềm {app_name} cho nền tảng {platform} không tồn tại phiên bản {version}"}
 
         # Xoá toàn bộ thư mục phiên bản
         import shutil
         shutil.rmtree(vdir)
+        # Ghi log lại
+        system_logger.warning(f"Người dùng đã xóa tệp tin {vdir}")
         return {"Message": f"Đã xoá {app_name}/{platform}/{version}"}
