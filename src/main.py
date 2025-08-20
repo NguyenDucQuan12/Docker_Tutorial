@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from db.database import engine
 from db import models
-from api import user_login, file, health_check, update_application
+from api import user_login, file, health_check, update_application, proxy
 from middlerware import logger
 from auth import authentication
 from dotenv import load_dotenv
@@ -45,6 +45,7 @@ app.include_router(file.router)
 app.include_router(health_check.router)
 app.include_router(authentication.router)
 app.include_router(update_application.router)
+app.include_router(proxy.router)
 
 # Tạo icon cho trang web api, nó sẽ hiển thị hình ảnh favicon ở thư mục `static/favicon.ico`
 @app.get('/favicon.ico')
