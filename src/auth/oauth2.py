@@ -76,7 +76,7 @@ def get_info_user_via_token(token: Optional[str] = Depends(get_optional_token), 
     credentials_exception = HTTPException(
         status_code= status.HTTP_401_UNAUTHORIZED,
         detail= {
-            "message": "Không thể xác thực token người dùng"
+            "Message": "Không thể xác thực token người dùng"
         },
         headers= {"WWW-Authenticate": "Bearer"}
     )
@@ -128,7 +128,7 @@ def required_token_user(token: str = Depends(oauth2_scheme), db: Session = Depen
     credentials_exception = HTTPException(
         status_code= status.HTTP_401_UNAUTHORIZED,
         detail= {
-            "message": "Không thể xác thực token người dùng"
+            "Message": "Không thể xác thực token người dùng"
         },
         headers= {"WWW-Authenticate": "Bearer"}
     )
