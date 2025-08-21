@@ -1,8 +1,9 @@
 import logging
 import shutil
+import threading
+import time
 import os
 from datetime import datetime
-from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -52,11 +53,8 @@ _formatter = logging.Formatter(
 )
 
 # Tạo đường dẫn tệp log theo ngày
-def _log_file_path():
-    """
-    Tạo thư mục chứa log cho ngày mới
-    """
-    day_str = datetime.now().strftime("%d-%m-%y")
+def _log_file_path(day_str=None):
+    day_str = day_str or datetime.now().strftime("%d-%m-%y")
     log_dir = os.path.join(SYSTEM_LOG_DIRECTORY, day_str)
     os.makedirs(log_dir, exist_ok=True)
 
@@ -64,13 +62,58 @@ def _log_file_path():
     _remove_old_logs()
     return os.path.join(log_dir, "system_log.log")
 
-# Cấu hình TimedRotatingFileHandler để xoay file log mỗi ngày vào lúc midnight
-log_handler = TimedRotatingFileHandler(
-    _log_file_path(), when="midnight", interval=1, backupCount=30, encoding="utf-8"
-)
-log_handler.setFormatter(_formatter)
+# Cấu hình TimedRotatingFileHandler để xoay file log mỗi ngày vào lúc midnight (Không tự tạo vào ngày mới)
+# log_handler = TimedRotatingFileHandler(
+#     _log_file_path(), when="midnight", interval=1, backupCount=30, encoding="utf-8"
+# )
+# log_handler.setFormatter(_formatter)
 
-# Logger mới cho system_log.log
+# # Logger mới cho system_log.log
+# system_logger = logging.getLogger("system_logger")
+# system_logger.setLevel(logging.INFO)
+# system_logger.addHandler(log_handler)
+
+# Logger ứng dụng (Sử dụng thread để tự tạo tệp cho ngày mới)
 system_logger = logging.getLogger("system_logger")
 system_logger.setLevel(logging.INFO)
-system_logger.addHandler(log_handler)
+
+
+# Đảm bảo tạo file log cho ngày hiện tại
+_current_day = datetime.now().strftime("%d-%m-%y")
+_file_handler = logging.FileHandler(_log_file_path(_current_day), encoding="utf-8")
+_file_handler.setFormatter(_formatter)
+system_logger.addHandler(_file_handler)
+
+
+# Hàm kiểm tra và xoay log khi sang ngày mới
+def _rotate_if_new_day():
+    global _current_day, _file_handler
+    day_now = datetime.now().strftime("%d-%m-%y")
+    if day_now == _current_day:
+        return
+
+    # Cập nhật ngày mới và tạo file log mới
+    _current_day = day_now
+    new_log_path = _log_file_path(_current_day)
+    
+    try:
+        # Đóng handler cũ nếu có
+        system_logger.removeHandler(_file_handler)
+        _file_handler.close()
+    except Exception:
+        pass
+
+    # Tạo file log mới cho ngày mới
+    new_handler = logging.FileHandler(new_log_path, encoding="utf-8")
+    new_handler.setFormatter(_formatter)
+    system_logger.addHandler(new_handler)
+    _file_handler = new_handler
+
+# Thread nền kiểm tra ngày mới
+def _rotation_thread():
+    while True:
+        try:
+            _rotate_if_new_day()
+        except Exception:
+            pass
+        time.sleep(3600)  # Kiểm tra mỗi 1 tiếng
