@@ -34,13 +34,13 @@ async def download_file(file_path: str):
     """
     return await File_Controller.download_file(file_path)
    
-@router.delete("/delete/{file_name}", summary="Xóa file")
-async def delete_file(file_name: str, user_info: UserAuth = Depends(required_token_user)):
+@router.delete("/delete/{file_path:path}", summary="Xóa file")
+async def delete_file(file_path: str, user_info: UserAuth = Depends(required_token_user)):
     """
     Xóa tệp tin trên server  
     Sử dụng dấu ngăn cách giữa các đường dẫn là `\\\`  
     """
-    return await File_Controller.delete_file(file_name, user_info)
+    return await File_Controller.delete_file(file_path, user_info)
 
 @router.put("/rename", summary="Đổi tên file")
 async def rename_file( old_name: str = Query(..., description="Tên file cũ"), new_name: str = Query(..., description="Tên file mới")):
