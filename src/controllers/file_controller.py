@@ -65,7 +65,7 @@ class File_Controller :
 
         except Exception as e:
             # Ghi log lại
-            system_logger.error(f"Lỗi khi người dùng {user_info["Name"]} tải lên tệp tin {file.filename}: {str(e)}")
+            system_logger.error(f"Lỗi khi người dùng {user_info['Name']} tải lên tệp tin {file.filename}: {str(e)}")
 
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -142,6 +142,9 @@ class File_Controller :
             if content_type is None:
                 content_type = "application/octet-stream"  # fallback mặc định
 
+            # Ghi log
+            system_logger.info(f"Người dùng đã tải tệp tin: {target}")
+
             # Trả file kèm header Content-Disposition
             return FileResponse(
                 path=str(target),
@@ -176,22 +179,31 @@ class File_Controller :
                 "Message": "Bạn không có quyền xóa tệp tin trên máy chủ"
             }
         
-        # Nối chuỗi lại thành đường dẫn đến tệp tin
-        file_path = os.path.join(UPLOAD_DIRECTORY, file_name)
+        # Chuẩn hóa lại đường dẫn
+        normalized = file_name.replace("\\", "/").strip()
+
+        base_dir = Path(UPLOAD_DIRECTORY).resolve()
+        target = (base_dir / normalized).resolve()
+
+        # Chống path traversal
+        if base_dir not in target.parents and base_dir != target:
+            # Ghi log lại
+            system_logger.error(f"Người dùng cung cấp đường dẫn tới tệp tin không hợp lệ: {target}")
+            return {"Message": "Đường dẫn tới tệp tin không hợp lệ"}
 
         # Kiểm tra tệp tin có tồn tại trên server không
-        if not os.path.isfile(file_path):
+        if not target.is_file():
             # Ghi log lại
-            system_logger.error(f"Người dùng {user_info["Name"]} xóa tệp tin trên máy chủ không hợp lệ: {file_path}")
+            system_logger.error(f"Người dùng {user_info['Name']} xóa tệp tin trên máy chủ không hợp lệ: {target}")
             return {
                 "Message": f"Tệp tin {file_name} không tồn tại trên máy chủ"
             }
         
         # Tiến hành xóa tệp tin
         try:
-            os.remove(file_path)
+            os.remove(target)
             # Ghi log lại
-            system_logger.warning(f"Người dùng {user_info["Name"]} đã xóa tệp tin: {file_path}")
+            system_logger.warning(f"Người dùng {user_info['Name']} đã xóa tệp tin: {target}")
             return {
                 "Operator": user_info["Name"],
                 "Message": f"Đã xóa tệp tin {file_name} thành công"
