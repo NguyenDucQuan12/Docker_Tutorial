@@ -120,9 +120,9 @@ if __name__ == "__main__":
 
 
     # Ví dụ sử dụng
-    upload_file("C:\\Users\\Server_Quan_IT\\Pictures\\Screenshots\\Screenshot 2024-09-20 093219.png")
+    # upload_file("C:\\Users\\Server_Quan_IT\\Pictures\\Screenshots\\Screenshot 2024-09-20 093219.png")
     # list_files()
     # download_file("Nguyễn Đức Quân\\Screenshot 2024-09-20 093219.png", "downloaded_test.png")
     # file_info("Nguyễn Đức Quân\\Screenshot 2024-09-20 093219.png")
     # rename_file("test.txt", "test_renamed.txt")
-    # delete_file("Nguyễn Đức Quân\\Screenshot 2024-09-20 093219.png")
+    delete_file("Guest/Screenshot 2024-09-20 093219.png")
