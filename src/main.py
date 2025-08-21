@@ -1,5 +1,6 @@
 from fastapi import FastAPI# pip install "fastapi[standard]"
 import uvicorn
+import threading
 import os
 from contextlib import asynccontextmanager
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -7,33 +8,49 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from db.database import engine
 from db import models
-from api import user_login, file, health_check, update_application, proxy
+from log.system_log import _rotation_thread
+from api import user_login, file, health_check, update_application
 from middlerware import logger
 from auth import authentication
+from services.email_services import InternalEmailSender
 from dotenv import load_dotenv
 
 load_dotenv()  # Tự động tìm và nạp file .env ở thư mục hiện tại
 
 
+# Khởi tạo email
+email_service = InternalEmailSender()
+
+
 # Đường dẫn thư mục lưu trữ file
 PORT_HOST = os.getenv("PORT_HOST", "8000")
+EMAIL_ADMIN = os.getenv("EMAIL_ADMIN", "nguyenducquan2001@gmail.com")
+IP_ADDRESS_HOST = os.getenv("IP_ADDRESS_HOST", "nguyenducquan2001@gmail.com")
 
 # Ép kiểu để port là số nguyên
 PORT = int(PORT_HOST)
+
+# Khởi động thread nền tạo file log cho ngày mới của log hệ thống (ko gọi trong system_log vì mỗi khi import nó lại mở 1 thread, chỉ nên gọi 1 lần ở main)
+log_thread = threading.Thread(target=_rotation_thread, name="DailySystemLogRotationThread", daemon=True)
+log_thread.start()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Các câu lệnh được thực hiện khi khởi động (Dùng cho việc khởi tạo các mô hình AI)
-    print("Khởi tạo Fast API server")
+    # print("Khởi tạo Fast API server")
+    # Gửi mail thông báo tới người dùng là đã khởi động FastAPI
+    email_service.send_mail_on_startup(to_email= EMAIL_ADMIN, website_name= IP_ADDRESS_HOST)
     yield
     # Các câu lệnh sau yield được thực hiện khi kết thúc chương trình
-    print("Kết thúc Fast API server")
+    # print("Kết thúc Fast API server")
+    email_service.send_mail_on_shutdown(to_email= EMAIL_ADMIN, website_name= IP_ADDRESS_HOST)
 
 # Khởi tại FastAPi
 app = FastAPI(
     docs_url="/myapi",  # Đặt đường dẫn Swagger UI thành "/myapi"
-    redoc_url=None  # Tắt Redoc UI
+    redoc_url=None,  # Tắt Redoc UI
+    lifespan= lifespan  # Thêm câu lệnh lifespan
 )
 
 # Đưa middleware vào app FastAPI
@@ -45,7 +62,6 @@ app.include_router(file.router)
 app.include_router(health_check.router)
 app.include_router(authentication.router)
 app.include_router(update_application.router)
-app.include_router(proxy.router)
 
 # Tạo icon cho trang web api, nó sẽ hiển thị hình ảnh favicon ở thư mục `static/favicon.ico`
 @app.get('/favicon.ico')
