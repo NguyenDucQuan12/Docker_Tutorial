@@ -20,40 +20,81 @@ Dưới đây là một số lỗi xảy ra trong quá trình cài đặt `Docke
 
 # II. Xây dựng phần mềm chạy với Docker  
 
-## 1. Xây dựng phần mềm
-Để có thể chạy với `Docker` thì tất nhiên ta phải có phần mềm trước. Dưới đây là hướng dẫn ví dụ với phần mềm sử dụng `Python 3.10`, `Fast API`.  
+## 1. Cấu trúc dự án
+Để có thể chạy với `Docker` thì tất nhiên ta phải có phần mềm trước. Dưới đây là hướng dẫn ví dụ với phần mềm sử dụng `Python 3.12`, `Fast API`.  
 
 Cấu trúc dự án như sau:  
 ```
 Docker/
 │
+├── .venv_docker/        # Môi trường ảo trong python
+├── .vscode/            # Cấu hình debug trong visual studio code
 ├── src/
 │   ├── main.py           # Tệp chính chạy chương trình
 │   ├── api/              # Các router (endpoint)
 │   │   ├── __init__.py
-│   │   └── example.py
-│   ├── schemas/                # Các schema để validation dữ liệu
+│   │   └── health_check.py
+│   ├── auth/              # Xác thực người dùng
 │   │   ├── __init__.py
-│   │   ├── user.py             # Schema cho User
-│   │   └── item.py   
-│   ├── services/         # Các dịch vụ khác
+│   │   └── authentication.py
+│   ├── controller/              # Xử lý các api
 │   │   ├── __init__.py
-│   │   ├── user_service.py
-|   |   └── mail_service.py
+│   │   └── user_controller.py
 │   ├── db/               # Kết nối database
 │   |   ├── __init__.py
-│   |   └── session.py
+│   |   └── database.py
+│   ├── log/               # Cấu hình ghi log
+│   |   ├── __init__.py
+│   |   └── api_log.py
+│   ├── middleware/              # middleware
+│   │   ├── __init__.py
+│   │   └── logger.py
+│   ├── schemas/                # Các schema để validation dữ liệu
+│   │   ├── __init__.py      # Schema cho User
+│   │   └── user.py   
+│   ├── services/         # Các dịch vụ khác
+│   │   ├── __init__.py
+|   |   └── mail_service.py
+│   ├── test/               # Các tệp test api
+│   │   ├── __init__.py
+|   |   └── file_api_test.py
 |   └──utils/
 |       ├── __init__.py
-|       ├── hash.py
-|       └── token.py
+|       └── hash.py
 │
 ├── requirements.txt      # Danh sách package cần cài
-├── Dockerfile            # Nếu cần chạy bằng Docker
+├── .dockerignore            # Cấu hình bỏ qua các thư mục, tệp trong docker
+├── .env            # Tệp tin chứa cấu hình các thông số
+├── .gitignore            # Cấu hình bỏ qua các thư mục, tệp tin trong git
+├── Dockerfile            # Xây dựng các image cho docker
+├── docker-compose.yml    # Cấu hình các thông số khi chạy trên docker
 └── README.md
 ```
 
-## 2. Xây dựng CSDL
+## 2. Tạo môi trường ảo 
+Để dự án được xây dựng tốt nhất, ko tải các thư viện bừa bãi, cài thẳng vào máy tính thì ta sử dụng `môi trường ảo của python`.  
+
+Chi tiết cách thức tạo môi trường ảo xem [tại đây](https://github.com/NguyenDucQuan12/virtual_environment_python)  
+Chạy lệnh sau kiểm tra xem có python phiên bản 3.12 hay không.  
+```python
+py --list
+```
+
+Chạy lệnh tạo môi trường ảo sau:  
+```python
+py -3.12 -m venv .venv_docker --prompt="Docker API"
+```
+
+Sau đó kích hoạt môi trường ảo và cài đặt các thư viện cần thiết như sau:  
+```python
+python -m pip install -r requirements.txt  
+```
+Nếu thay đổi thư viện thì thêm vào tệp như sau:  
+```python
+python -m pip freeze > requirements.txt
+```
+
+## 3. Kết nối CSDL
 Sử dụng `sqlalchemy` và `pydantic` để kết nối với `SQL Server`.  
 
 ```python
@@ -81,10 +122,13 @@ connection_url = URL.create(
     },
 )
 ```
+> "driver": "ODBC Driver 18 for SQL Server"  
+> Lưu ý, đối với driver ODBC thì lên trang chủ của Microsoft tải về theo từng phiên bản, nếu tải về phiên bản 17 thì thay đổi theo số phiên bản tương ứng  
+
 Khi chạy trên `Docker` ta có thể lấy `SQL Server` tại host bằng chuỗi: `host.docker.internal`. Chuỗi này tương tự `localhost`.  
 Chi tiết xem tại tệp [database](src/db/database.py)  
 
-### 2.1 Tạo bảng trong CSDL
+### 3.1 Tạo bảng trong CSDL
 Lấy ví dụ với bảng `User_Login` trong CSDL.  
 
 Đầu tiên cần định nghĩa bảng `User_Login` trong tệp [model](src/db/models.py):  
@@ -109,7 +153,7 @@ class DbUser_Login(Base):
 ```
 Với 1 bảng được sử dụng trong SQLAchemy thì luôn yêu cầu `khóa chính`, vì vậy ta khai báo cột `ID` làm khóa chính.  
 
-### 2.2 Tạo lược đồ cho bảng
+### 3.2 Tạo lược đồ cho bảng
 
 Sau khi khai báo bảng `User_Login` ta sẽ tiến hành tạo các lược đồ `lấy thông tin từ người dùng` và lược đồ `trả về các thông tin cho người dùng`.  
 Ví dụ với bảng `User_Login` có 10 cột, tuy nhiên khi đăng ký tài khoản mới ta chỉ cần người dùng cung cấp: `User_Name`,`Email`, `Password` và có thể thêm giá trị `ID` hoặc để `ID` là giá trị sinh ra random thì ko cần người dùng cung cấp.  
@@ -180,7 +224,7 @@ class User_Login_OTP_Display (BaseModel):
 > Như vậy thì lược đồ mới tự động chọn lọc các thông tin trùng nhau, bỏ các thông tin không cần thêm vào lược đồ  
 > Đối với các dữ liệu trả về từ Databse thì tốt nhất nên đặt tên các trường trong lược đồ trùng tên với các cột trong Database  
 
-### 2.3 Thực hiện truy vấn CSDL
+### 3.3 Thực hiện truy vấn CSDL
 
 Đối với các câu lệnh truy vấn tới CSDL, ta phân chia các câu lệnh thành các tệp truy vấn tương ứng với từng bảng. Ví dụ với bảng `User_Login` ta thực hiện tất cả các câu truy vấn tại tệp [db_user_login](src/db/db_user_login.py).  
 
@@ -232,7 +276,7 @@ def create_new_user_login(db: Session, new_user_login: DbUser_Login):
 ```
 Luôn chạy các câu lệnh thao tác với CSDL vào khối `try-except` để xử lý tốt các trường hợp lỗi xảy ra.  
 
-## 3.Tạo endpoint cho các api
+## 4. Tạo endpoint cho các api
 
 Đối với mỗi api ta sẽ để vào thư mục [api](src/api), ví dụ với api: `user_login` có thể tham khảo tại tệp [user_login](src/api/user_login.py).  
 Ta đặt tên tệp trùng với endpoint để tạo sự đồng nhất, dễ nhận biết và sửa lỗi sau này.  
@@ -246,7 +290,7 @@ router = APIRouter(
 ```
 Mặc định các endpoint sẽ được tự động thêm tiền tố `prefix` vào đầu các địa chỉ. Ví dụ: `http://172.31.99.130:8000/user_login/abc_enpoint`  
 
-### 3.1 Các enpoint không cần xác thực người dùng (Non Authentication)
+### 4.1 Các enpoint không cần xác thực người dùng (Non Authentication)
 Với mỗi endpoint ta khai báo như sau:  
 ```python
 @router.post("/new_user", response_model = User_Login_Display)
@@ -283,7 +327,7 @@ Endpoint `/user_login/new_user` sẽ gọi hàm `create_user` với các tham s�
 
 Sau đó hàm `create_user` gọi tới controller kiểm soát các hành vi của endpoint này.  
 
-### 3.2 Các endpoint cần xác thực người dùng (Authentication)
+### 4.2 Các endpoint cần xác thực người dùng (Authentication)
 
 Với một số endpoint bảo mật, không thể tùy ý cho bất cứ ai cũng sử dụng được. Ta cần xác thực người dùng, xem họ có quyền sử dụng api này hay không. Ví dụ với các thao tác như xóa dữ liệu, thay đổi dữ liệu ta nên hạn chế việc ai cũng có thể sử dụng api này. Vì vậy ta tạo ra một phương thức xác thực trước khi cho họ thao tác với api.  
 
@@ -323,7 +367,7 @@ response = requests.put(
     headers= headers
 )
 ```
-### 3.3 Tạo controller xử lý các endpoint
+### 4.3 Tạo controller xử lý các endpoint
 
 Sau khi tạo endpoint và các hàm xử lý khi api được gọi, để code rõ ràng, nhìn đẹp mắt, sau này cũng dễ sửa chữa, nâng cấp thì các thao tác khi người dùng gọi api sẽ được xử lý ở một trung gian kết nối tất cả (Database, authentication, cilent, ...) là `Controller`.  
 
