@@ -112,7 +112,7 @@ class UpdateApplicationController:
             json.dump(meta, f, ensure_ascii=False, indent=2)
 
         # Ghi log lại
-        system_logger.info(f"Người dùng {user_info["Name"]} tải lên phần mềm {app_name} cho nền tảng {platform} với phiên bản: {version}")
+        system_logger.info(f"Người dùng {user_info['Name']} tải lên phần mềm {app_name} cho nền tảng {platform} với phiên bản: {version}")
 
         return {
             "Message": "Upload thành công",
