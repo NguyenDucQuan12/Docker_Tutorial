@@ -8,8 +8,12 @@ from utils.random_id import get_random_string
 from utils.constants import *
 from datetime import datetime
 from db import db_user_login
+from services.email_services import InternalEmailSender
 
 EMAIL_REGEX = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
+
+# Khai báo dịch vụ mail
+email_services = InternalEmailSender()
 
 class User_Login_Controller:
     """
@@ -85,6 +89,13 @@ class User_Login_Controller:
                         "message": new_user["message"]
                     }
                 ) 
+            
+            # Nếu tạo người dùng thành công, gửi mail tới họ
+            email_services.send_email_for_new_account(
+                    to_email= email,
+                    name= user_name,
+                    website_name= "Hệ thống API"
+                )
 
         return new_user["data"]
     
