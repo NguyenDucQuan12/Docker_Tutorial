@@ -57,7 +57,7 @@ class InternalEmailSender():
                     Thank and best regards,
                 </p>
                 <p style="color: #000000; font-size: 17px; font-weight: bold; line-height: 1; font-family: Calibri, sans-serif;">
-                    Dịch vụ gửi mail phát triển bởi Nguyễn Đức Quân
+                    Ứng dụng phát triển bởi Nguyễn Đức Quân
                 </p>
                 <br>
             """
@@ -69,22 +69,22 @@ class InternalEmailSender():
         try:
             # Nếu người dùng sử dụng gmail hoặc outlook
             if self.email_service == 'gmail' or self.email_service == 'outlook':
-                # Thiết lập kết nối đến SMTP server gmail và outlook
-                with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
-                    server.starttls()  # Bật mã hóa TLS khi kết nối
-                    server.login(self.email, self.password)
-                    return server
+                # Thiết lập kết nối đến SMTP server
+                server = smtplib.SMTP(self.smtp_host, self.smtp_port)
+                server.starttls()  # Bật mã hóa TLS
+                server.login(self.email, self.password)
 
             # Cấu hình cho Email nội bộ
             elif self.email_service == 'internal':
                 # Thiết lập kết nối đến SMTP server nội bộ
-                with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
-                    return server
+                server = smtplib.SMTP(self.smtp_host, self.smtp_port)
 
             else:
                 # Ghi log lại nếu dịch vụ không hợp lệ
                 system_logger.error(f"Chương trình chỉ hỗ trợ Gmail, Outlook hoặc Internal, vui lòng chọn đúng dịch vụ. Không sử dụng {self.email_service}")
                 return None
+            
+            return server
 
         except SMTPException as e:
             system_logger.error(f"Lỗi khi đăng nhập email: {str(e)}")
@@ -180,6 +180,10 @@ class InternalEmailSender():
                 if server:
                     # Gửi email
                     server.sendmail(self.email, recipients, msg.as_string())
+                    # Đóng kết nối
+                    server.quit()
+
+                    # Trả về thành công
                     success_send_email = True
                     system_logger.info(f"Email gửi thành công tới {to_email}.")
 
@@ -295,13 +299,13 @@ class InternalEmailSender():
         """
         Gửi email thông báo khi ứng dụng FastAPI đã được khởi động thành công.
         """
-        subject_mail = f"Thông báo: {website_name} đã được khởi động"
+        subject_mail = f"Thông báo: Máy chủ {website_name} đã được khởi động"
         body_startup_notification = f"""
         <html>
             <body style="font-family: Arial, sans-serif; color: #333;">
-                <h2 style="color: #007BFF;">Thông báo: {website_name} đã được khởi động thành công!</h2>
+                <h2 style="color: #007BFF;">Máy chủ {website_name} đã được khởi động thành công!</h2>
                 <p>Chào Admin,</p>
-                <p>Chúng tôi xin thông báo rằng ứng dụng <strong>{website_name}</strong> đã được khởi động vào lúc {timestamp}. Các dịch vụ của chúng tôi hiện đã sẵn sàng và bạn có thể bắt đầu sử dụng ngay lập tức.</p>
+                <p>Chúng tôi xin thông báo rằng máy chủ <strong>{website_name}</strong> đã được khởi động vào lúc <strong>{timestamp}</strong>. Các dịch vụ của chúng tôi hiện đã sẵn sàng và bạn có thể bắt đầu sử dụng ngay lập tức.</p>
                 <p>Cảm ơn bạn đã tin tưởng và sử dụng dịch vụ của chúng tôi!</p>
                 <br>
                 <p style="font-size: 12px; color: #777;">Đây là email tự động, vui lòng không phản hồi trực tiếp email này.</p>
@@ -319,13 +323,13 @@ class InternalEmailSender():
         """
         Gửi email thông báo khi ứng dụng FastAPI đã dừng.
         """
-        subject_mail = f"Thông báo: {website_name} đã dừng hoạt động"
+        subject_mail = f"Thông báo: Máy chủ {website_name} đã dừng hoạt động"
         body_shutdown_notification = f"""
         <html>
             <body style="font-family: Arial, sans-serif; color: #333;">
-                <h2 style="color: #007BFF;">Thông báo: {website_name} đã dừng hoạt động!</h2>
+                <h2 style="color: #007BFF;">Máy chủ {website_name} đã dừng hoạt động!</h2>
                 <p>Chào Admin,</p>
-                <p>Chúng tôi xin thông báo rằng ứng dụng <strong>{website_name}</strong> đã dừng hoạt động vào lúc {timestamp}. Các dịch vụ hiện không còn khả dụng cho đến khi ứng dụng được khởi động lại.</p>
+                <p>Chúng tôi xin thông báo rằng máy chủ <strong>{website_name}</strong> đã dừng hoạt động vào lúc <strong>{timestamp}</strong>. Các dịch vụ hiện không còn khả dụng cho đến khi ứng dụng được khởi động lại.</p>
                 <p>Chúng tôi xin lỗi về sự bất tiện này và sẽ cố gắng khôi phục dịch vụ nhanh nhất có thể.</p>
                 <br>
                 <p style="font-size: 12px; color: #777;">Đây là email tự động, vui lòng không phản hồi trực tiếp email này.</p>
