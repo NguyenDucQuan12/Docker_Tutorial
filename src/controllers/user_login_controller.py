@@ -1,16 +1,29 @@
 from sqlalchemy.orm.session import Session
 from fastapi import HTTPException, status
 import re
+from typing import List                                       # Kiểu danh sách
 from schemas.schemas import User_Login_Base
 from db.models import DbUser_Login
 from utils.hash import Hash
 from utils.random_id import get_random_string
 from utils.constants import *
+from utils.cache import make_cache_key, get_cache, set_cache, delete_by_prefix  # Tiện ích cache
 from datetime import datetime
 from db import db_user_login
 from services.email_services import InternalEmailSender
+from log.system_log import system_logger
 
 EMAIL_REGEX = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
+# Khai báo "prefix" chung cho cache danh sách user (để dễ xoá theo prefix khi invalidation)
+CACHE_LIST_USERS_PREFIX = "cache:users:list"
+
+def invalidate_list_users_cache() -> int:
+    """
+    Xoá mọi cache danh sách user.
+    Gọi hàm này ngay sau khi CREATE/UPDATE/DELETE user để tránh lấy dữ liệu cũ khi truy vấn.
+    """
+    deleted = delete_by_prefix(CACHE_LIST_USERS_PREFIX)
+    return deleted
 
 # Khai báo dịch vụ mail
 email_services = InternalEmailSender()
@@ -88,7 +101,10 @@ class User_Login_Controller:
                     detail={
                         "message": new_user["message"]
                     }
-                ) 
+                )
+            
+            # Xoá cache danh sách user (nếu có) để tránh lấy dữ liệu cũ
+            invalidate_list_users_cache()
             
             # Nếu tạo người dùng thành công, gửi mail tới họ
             email_services.send_email_for_new_account(
@@ -101,9 +117,22 @@ class User_Login_Controller:
     
     def get_all_users(db: Session):
         """
-        Lấy danh sách tất cả người dùng
+        Lấy danh sách tất cả người dùng, có cache Redis.
+        - TTL mặc định 60 giây (trong thời gian này, các lần gọi tiếp theo sẽ lấy cache nếu có)
+        - Khi có thay đổi user (create/update/delete) -> nên xoá cache prefix.
         """
-        # Gọi hàm để lấy danh sách người dùng từ CSDL
+        # 1) Tạo key cache. Vì API này không có tham số lọc, ta dùng key tĩnh.
+        #    Nếu sau này có tham số (page, dept, ...) thì đưa vào dict để tạo hash khác nhau.
+        key = make_cache_key("users:list", {"v": 1})  # "v": 1 là version nhỏ để bạn chủ động bust cache khi đổi format
+
+        # 2) Thử lấy cache
+        cached = get_cache(key)
+        if cached is not None:
+            # Cache hit → trả luôn. FastAPI sẽ ép về response_model cho bạn.
+            system_logger.info(f"Cache hit cho danh sách người dùng: {key}- {len(cached) if isinstance(cached, list) else '?'} items")
+            return cached
+    
+        #  3) Cache miss → truy vấn DB thực
         list_users = db_user_login.get_all_user_login(db=db)
 
         if not list_users["success"]:
@@ -114,7 +143,17 @@ class User_Login_Controller:
                 }
             )
         
-        return list_users["data"]
+        data = list_users["data"]  # Danh sách user (list[User_Login_Display] hoặc dict tương thích)
+
+        # (Tuỳ chọn) Giới hạn 1000 người ở đây
+        # if isinstance(data, list) and len(data) > 1000:
+        #     data = data[:1000]
+
+        # 4) Lưu cache với TTL 60 giây
+        set_cache(key, data, ttl=60)
+
+        # 5) Trả kết quả
+        return data
     
     def activate_user (db: Session, email_user: str, activate: bool, current_user):
         """
