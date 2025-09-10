@@ -1,14 +1,20 @@
 services:
-  redis:                                   # # Dịch vụ Redis để cache/đếm/bảo vệ
-    image: redis:latest               # # Image Redis mới nhất
-    command: ["redis-server", "--appendonly", "yes"]  # Bật AOF để dữ liệu cache sống qua restart
+  redis:
+    image: redis:latest
+    command: ["redis-server", "--appendonly", "yes"]  # Cho phép ghi dữ liệu ra data để bindmount ra ổ đĩa
     ports:
-      - "6379:6379"                        # # (Dev) expose ra host; Prod có thể bỏ để chỉ nội bộ network
+      - "6379:6379"
     environment:
-      - TZ=Asia/Ho_Chi_Minh                # # Múi giờ
+      - TZ=Asia/Ho_Chi_Minh
     volumes:
-      - ./redis-data:/data                 # # Lưu trữ dữ liệu redis ra host để có thể xem dữ liệu lưu trữ
-    restart: unless-stopped                # # Tự khởi động lại nếu dừng bất thường
+      - ./redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]   # 'PONG' = OK
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
   docker_api:
     # Cài đặt và khởi động: docker-compose up --build -d
     # Dừng lại image trước khi chạy lại: docker compose down
@@ -66,7 +72,8 @@ services:
         target: /app/log/system_log # Đường dẫn trong container (Phải trùng với khai báo phía trên)
       
     depends_on:
-      - redis                                    # đảm bảo Redis sẵn sàng trước khi app khởi động
+      redis:          # đảm bảo Redis được khởi chạy trước api, tuy nhiên việc Redis sẵn sàng truy vấn khi api khởi động xong hay không thì chưa chắc
+        condition: service_healthy   # Thêm 1 điều kiện để chỉ start API khi Redis “healthy”                                    
 
     # === Tự khởi động lại nếu crash ngoài ý muốn (Không khởi động lại do người dùng chủ động stop) ===
     restart: unless-stopped
