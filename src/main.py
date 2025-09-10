@@ -9,8 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from db.database import engine
 from db import models
 from log.system_log import _rotation_thread
-from api import user_login, file, health_check, update_application
+from api import user_login, file, health_check, update_application, security_admin, ops_dashboard
 from middlerware import logger
+from middlerware.security_guard import security_guard  # # Middleware phòng thủ
 from auth import authentication
 from services.email_services import InternalEmailSender
 from dotenv import load_dotenv
@@ -50,8 +51,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     docs_url="/myapi",  # Đặt đường dẫn Swagger UI thành "/myapi"
     redoc_url=None,  # Tắt Redoc UI
-    lifespan= lifespan  # Thêm câu lệnh lifespan
+    # lifespan= lifespan  # Thêm câu lệnh lifespan
 )
+
+# # Đăng ký middleware bảo vệ (đặt càng sớm càng tốt)
+app.middleware("http")(security_guard)
 
 # Đưa middleware vào app FastAPI
 app.add_middleware(BaseHTTPMiddleware, dispatch=logger.log_requests)
@@ -62,6 +66,8 @@ app.include_router(file.router)
 app.include_router(health_check.router)
 app.include_router(authentication.router)
 app.include_router(update_application.router)
+app.include_router(security_admin.router)
+app.include_router(ops_dashboard.router)
 
 # Tạo icon cho trang web api, nó sẽ hiển thị hình ảnh favicon ở thư mục `static/favicon.ico`
 @app.get('/favicon.ico')
