@@ -472,3 +472,53 @@ if current_user["Privilege"] not in HIGH_PRIVILEGE_LIST:
         }
     )
 ```
+
+# III. Khởi chạy phần mềm  
+## 1. Khởi chạy với docker compose
+Docker compose là một tệp tin cấu hình các thông số của dự án để chạy trên ứng dụng `Docker`. Phương pháp này tối ưu và tiện dụng nhất cho môi trường làm việc.  
+
+Để chạy bằng Docker thì đầu tiên ta sẽ khởi động ứng dụng `Docker` trên máy tính. Nếu chưa có thì tiến hành tải `Docker` từ trang chủ về trước.
+
+### 1.1 Khởi động đồng thời hai service
+
+Tệp tin `docker-compose.yml` hiện tại đang khai báo 2 dịch vụ (service) là `Redis` cho mục đích cache, `API` là dự án chính của chúng ta. Ta cần cả 2 dịch vụ này hoạt động song song nhau. Có một cách thức để khởi chạy 2 dịch vụ này cùng lúc như sau:  
+Mở terminal tại dự án và chạy lệnh:  
+```docker
+docker compose up --build -d
+```
+
+Trong tệp cấu hình có điều kiện: `depends_on: - redis` đảm bảo khởi động Redis trước rồi tới API. Tuy nhiên nó chỉ đảm bảo thứ tự khởi động trước và sau, còn Redis khởi động trước nhưng chưa sẵn sàng truy cập thì vẫn gặp lỗi.  
+Có thể kiểm tra nhanh như sau:  
+```docker
+docker compose ps
+docker compose logs -f redis
+docker compose logs -f docker_api
+```
+
+### 1.2 Chỉ khởi động 1 service
+Khi ta phát triển hệ thống, không tránh khỏi việc có lỗi, vì vậy ta cần sửa lỗi và sau khi sửa lỗi xong thì khởi động lại dịch vụ api. Tuy nhiên ta không nên tắt cả 2 dịch vụ và lại khởi động lại cả 2 dịch vụ. Ta có thể tắt mỗi dịch vụ API và khởi động lại nó như sau.  
+Dừng dịch vụ `API` và giữ dịch vụ `Redis`:  
+```docker
+docker compose stop docker_api
+```
+Trong đó `docker_api` là tên dịch vụ mà ta khai báo trong `docker-compose.yml`.  
+
+Khi lỡ tắt dịch vụ mà ta muốn chạy hoặc khởi động lại thì làm như sau, dành cho việc code ko thay đổi, thì dịch vụ này ko cần xây dựng lại:  
+```docker
+docker compose start docker_api
+# hoặc
+docker compose restart docker_api
+```
+Nếu ta sửa đổi code, có nghĩa là tạo ra 1 phiên bản mới cho dịch vụ API thì ta cần build lại container, container mới này chứa các code mới:  
+```docker
+docker compose up -d --no-deps --build docker_api
+```
+Trong đó:  
+- `-d` là chạy nền trên ứng dụng `Docker` mà không hiển thị lò ra terminal  
+- `--no-deps` không khởi động lại dịch vụ phụ thuộc (Redis)
+- `--build` là xây dựng lại image cho container (Do đã thay đổi code)  
+
+Ta có thể kiểm tra log như sau:  
+```docker
+docker compose logs -f docker_api
+```
