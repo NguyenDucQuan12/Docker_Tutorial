@@ -215,11 +215,10 @@ class InternalEmailSender():
         email_thread = threading.Thread(target=run)
         email_thread.start()
 
-    def send_mail_alert(self, to_email, body, attachment_path=None, callback=None):
+    def send_mail_alert(self, to_email, subject_mail, body, attachment_path=None, callback=None):
         """
         Gửi email cảnh báo tới quản trị viên hệ thống.
         """
-        subject_mail = f"[Cảnh báo] Hệ thống phát hiện hoạt động bất thường"
         # Gửi email với nội dung và chữ ký
         success_send_email = self.send_email_async(to_email=to_email, subject=subject_mail, 
                                                 body=body, signature=self.signature_email, 
