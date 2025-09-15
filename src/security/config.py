@@ -11,7 +11,7 @@ class TTLConfig:
     """
     metric_minute: int = 180
     suspicious_5min: int = 300
-    ban_seconds: int = 900
+    ban_seconds: int = 60 * 1  # Mặc định ban 15 phút
     rl_expire_multiplier: int = 2
 
 # Cấu hình TTL mặc định (có thể thay bằng biến môi trường khi cần)
