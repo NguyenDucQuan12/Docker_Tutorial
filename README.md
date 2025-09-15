@@ -474,20 +474,21 @@ if current_user["Privilege"] not in HIGH_PRIVILEGE_LIST:
 ```
 
 # III. Khởi chạy phần mềm  
+
+Để chạy bằng `Docker` thì đầu tiên ta sẽ khởi động ứng dụng `Docker` trên máy tính. Nếu chưa có thì tiến hành tải `Docker` từ trang chủ về trước.
+
 ## 1. Khởi chạy với docker compose
 Docker compose là một tệp tin cấu hình các thông số của dự án để chạy trên ứng dụng `Docker`. Phương pháp này tối ưu và tiện dụng nhất cho môi trường làm việc.  
-
-Để chạy bằng Docker thì đầu tiên ta sẽ khởi động ứng dụng `Docker` trên máy tính. Nếu chưa có thì tiến hành tải `Docker` từ trang chủ về trước.
 
 ### 1.1 Khởi động đồng thời hai service
 
 Tệp tin `docker-compose.yml` hiện tại đang khai báo 2 dịch vụ (service) là `Redis` cho mục đích cache, `API` là dự án chính của chúng ta. Ta cần cả 2 dịch vụ này hoạt động song song nhau. Có một cách thức để khởi chạy 2 dịch vụ này cùng lúc như sau:  
-Mở terminal tại dự án và chạy lệnh:  
+Mở terminal tại dự án (nơi đặt tệp `docker-compose.yml`) và chạy lệnh:  
 ```docker
 docker compose up --build -d
 ```
 
-Trong tệp cấu hình có điều kiện: `depends_on: - redis` đảm bảo khởi động Redis trước rồi tới API. Tuy nhiên nó chỉ đảm bảo thứ tự khởi động trước và sau, còn Redis khởi động trước nhưng chưa sẵn sàng truy cập thì vẫn gặp lỗi.  
+Trong tệp cấu hình có điều kiện: `depends_on: - redis` đảm bảo khởi động Redis trước rồi tới API. Tuy nhiên nó chỉ đảm bảo thứ tự khởi động trước và sau, còn Redis khởi động trước nhưng chưa sẵn sàng truy cập thì vẫn gặp lỗi. Đã thêm `condition` để đợi Redis khởi động xong thì mới chạy `Docker_API`.  
 Có thể kiểm tra nhanh như sau:  
 ```docker
 docker compose ps
@@ -497,13 +498,13 @@ docker compose logs -f docker_api
 
 ### 1.2 Chỉ khởi động 1 service
 Khi ta phát triển hệ thống, không tránh khỏi việc có lỗi, vì vậy ta cần sửa lỗi và sau khi sửa lỗi xong thì khởi động lại dịch vụ api. Tuy nhiên ta không nên tắt cả 2 dịch vụ và lại khởi động lại cả 2 dịch vụ. Ta có thể tắt mỗi dịch vụ API và khởi động lại nó như sau.  
-Dừng dịch vụ `API` và giữ dịch vụ `Redis`:  
+Dừng dịch vụ `API` và giữ dịch vụ `Redis` vẫn hoạt động:  
 ```docker
 docker compose stop docker_api
 ```
 Trong đó `docker_api` là tên dịch vụ mà ta khai báo trong `docker-compose.yml`.  
 
-Khi lỡ tắt dịch vụ mà ta muốn chạy hoặc khởi động lại thì làm như sau, dành cho việc code ko thay đổi, thì dịch vụ này ko cần xây dựng lại:  
+Khi lỡ tắt dịch vụ mà ta muốn chạy hoặc khởi động lại thì làm như sau, dành cho việc code ko thay đổi, thì dịch vụ này ko cần xây dựng (build) lại:  
 ```docker
 docker compose start docker_api
 # hoặc
@@ -514,7 +515,7 @@ Nếu ta sửa đổi code, có nghĩa là tạo ra 1 phiên bản mới cho d�
 docker compose up -d --no-deps --build docker_api
 ```
 Trong đó:  
-- `-d` là chạy nền trên ứng dụng `Docker` mà không hiển thị lò ra terminal  
+- `-d` là chạy nền trên ứng dụng `Docker` mà không hiển thị log ra terminal  
 - `--no-deps` không khởi động lại dịch vụ phụ thuộc (Redis)
 - `--build` là xây dựng lại image cho container (Do đã thay đổi code)  
 
@@ -522,3 +523,62 @@ Ta có thể kiểm tra log như sau:
 ```docker
 docker compose logs -f docker_api
 ```
+
+## 2. Khởi chạy bằng terminal
+Ta có thể khởi chạy phần mềm bằng terminal trong `Visual studio code` hoặc chính terminal tại thư mục chứa dự án.  
+Với VSCode, ta mở thư mục dự án và mở terminal của dự án ra. Kích hoạt môi trường ảo (nếu có).  
+
+![image](assets/github_img/activate_venv_terminal.png)
+
+Vì dự án của chúng ta sử dụng cache của `Redis` giúp cho chúng ta truy vấn một số api thường xuyên, liên tục nhanh hơn, không phải truy vấn vào `Database` để lấy dữ liệu liên tục khi mà dữ liệu không có sự thay đổi. Vì vậy ta cần chạy 2 dịch vụ để hoàn tất quá trình khởi chạy dự án.  
+
+### 2.1 Khởi chạy Redis
+
+`Redis` được chạy trên `docker desktop` với câu lệnh sau vào terminal:  
+```docker
+docker run -p 6379:6379 -it redis:latest
+```
+Nó sẽ lấy phiên bản mới nhất của `Redis` và khởi chạy, như vậy là hoàn tất khởi chạy `Redis`. Tuy nhiên để ta sẽ chạy một câu lệnh chi tiết hơn như sau:  
+```dcoker
+docker run -d --name my-redis -p 6379:6379 -v ./redis-data:/data -e TZ=Asia/Ho_Chi_Minh redis:latest --appendonly yes
+```
+
+![image](assets/github_img/run_redis_with_terminal.png)
+
+Hoặc mở terminal tại thư mục dự án và chạy như sau  
+
+![image](assets/github_img/open_terminal_in_folder.png)
+
+Trong đó:  
+- `-d`: Chạy nền dịch vụ trong `Docker Desktop`  
+- `--name: my-redis`: Đặt tên cho container là `my-redis`  
+- `-p 6379:6379`: Gán port 6379 từ docker ra port 6379 bên ngoài để có thể truy cập được  
+- `-v ./redis-data:/data`: Bind mount (sao chép dữ liệu) từ thư mục `data` trong `Docker` ra thư mục `redis-data` trên máy tính  
+- `-e TZ=Asia/Ho_Chi_Minh`: Biến môi trường lấy thời gian trong docker theo múi giờ VN  
+- `redis:latest`: Truy cập phiên bản mới nhất của `Redis` trên hệ thống `Docker`  
+- `--appendonly yes`: Cho phép dữ liệu ghi từ Redis được chép vào tệp tin. Điều này giúp ta copy thư mục data mới thành công. Bởi nếu ko chép dữ liệu ra tệp tin thì không có tệp tin nào để chép vào thư mục `redis-data`
+
+![image](assets/github_img/redis_in_dockerdesktop.png)
+
+Sau đó mở `Docker Desktop` lên thấy dịch vụ `Redis` đang chạy ở mục container như hình thì là đã hoàn thành.  
+
+### 2.2 Khởi chạy docker_api
+Sau khi dịch vụ cache được khởi chạy thành công thì ta tiến hành chạy dịch vụ api của chúng ta. Có 3 cách để chúng ta khởi chạy dịch vụ api này.  
+#### Sử dụng VSCode làm máy chủ để chạy hệ thống
+Cả 2 lệnh bên dưới đều được giới thiệu tại trang chủ của `FastAPI`, nếu sau này chạy lỗi, vào trang chủ `FastAPI` để xem lại lệnh mới.  
+
+```python
+fastapi dev src/main.py
+```
+Với lệnh này ta sẽ tiến vào chế độ phát triển, khi ta thay đổi code hay chỉnh sửa gì thì máy chủ api sẽ tự động khởi động lại để cập nhật những code mới. Cách này rất hữu ích trong việc phát triển, vì chúng ta thay đổi, cập nhật code thường xuyên.  
+
+```python
+fastapi run src/main.py
+```
+Còn với lệnh này thì ta sẽ lấy máy hiện tại làm máy chủ để cho các máy khác truy cập vào api của chúng ta thông qua ip.  
+
+![image](assets/github_img/run_fast_api_in_terminal.png)
+
+#### Sử dụng Docker Desktop làm máy chủ (Khuyến nghị sau khi phát triển xong)
+Thay vì sử dụng VSCode để chạy FastAPI thì ta sử dụng `Docker Desktop` sẽ tốt hơn, vì nó có các dịch vụ hỗ trợ vận hành cực kỳ tốt.  
+Sử dụng Docker Desktop thì ta chạy với tệp tin `docker-compose.yml` như hướng dẫn ở phần I
