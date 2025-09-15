@@ -138,16 +138,14 @@ def unban_ip(base_url: str, token: str, ip: str) -> bool:
 
 
 # ---------- Main ----------
+base = "http://127.0.0.1:8000" # Base URL của API FastAPI
+username = "nguyenducquan2001@gmail.com"
+password = "1"
+path = "/file"  # Đường dẫn sẽ gọi để gây nghi vấn
+count = 50  # Số request nghi vấn gửi liên tiếp
+sleep_ms = 50 # Nghỉ giữa các lần bắn (ms)
 
 def main():
-
-    base = "http://127.0.0.1:8000" # Base URL của API FastAPI
-    username = "nguyenducquan2001@gmail.com"
-    password = "1"
-    path = "/file"  # Đường dẫn sẽ gọi để gây nghi vấn
-    count = 50  # Số request nghi vấn gửi liên tiếp
-    sleep_ms = 50 # Nghỉ giữa các lần bắn (ms)
-
     # 2) Login để lấy token (Bearer)
     print("[LOGIN] Đăng nhập /auth/login ...")
     token = login_and_get_token(base, username, password)
@@ -183,6 +181,10 @@ def main():
     except Exception as e:
         print("   - Lỗi khi retry:", e)
 
+def get_current_ban():
+    token = login_and_get_token(base, username, password)
+    ip = pick_banned_ip(base, token)
+    print(ip)
 
 if __name__ == "__main__":
-    main()
+    get_current_ban()
