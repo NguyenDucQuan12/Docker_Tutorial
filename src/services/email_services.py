@@ -215,13 +215,27 @@ class InternalEmailSender():
         email_thread = threading.Thread(target=run)
         email_thread.start()
 
-    def send_mail_alert(self, to_email, subject_mail, body, attachment_path=None, callback=None):
+    def send_mail_alert(self, to_email, subject_mail, ip, reason, path_api, user_agent, time_ban, attachment_path=None, callback=None):
         """
         Gửi email cảnh báo tới quản trị viên hệ thống.
         """
+        body_alert = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; color: #333;">
+                <p>Thông báo từ hệ thống,</p>
+                <p>Hệ thống vừa ngăn chặn truy cập của thiết bị có IP: <strong>{ip}</strong></p>
+                <p><strong>Lý do:</strong> {reason}</p>
+                <p><strong>Đường dẫn truy cập:</strong> {path_api}</p>
+                <p><strong>User-Agent:</strong> {user_agent or '-'}</p>
+                <p><strong>Thời gian bị chặn (giây):</strong> {time_ban}</p>
+                <br>
+                <p>Đây là mail tự động, vui lòng không phản hồi mail này!</p>
+            </body>
+        </html>
+        """
         # Gửi email với nội dung và chữ ký
         success_send_email = self.send_email_async(to_email=to_email, subject=subject_mail, 
-                                                body=body, signature=self.signature_email, 
+                                                body=body_alert, signature=self.signature_email, 
                                                 attachment_path=attachment_path, callback=callback)
     
         return success_send_email
