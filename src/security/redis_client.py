@@ -7,7 +7,7 @@ import redis              # Thư viện redis-py (pip install redis)
 Với Docker: `docker run -p 6379:6379 -it redis:latest`
 
 Hoặc chi tiết hơn: `docker run -d --name my-redis -p 6379:6379 -v ./redis-data:/data -e TZ=Asia/Ho_Chi_Minh redis:latest --appendonly yes`
-Cách chạy thứ 2 này sẽ lưu dữ liệu Redis ra thư mục redis-data trên host, tránh mất dữ liệu khi container dừng. (nhớ tao thư mục redis-data trước khi chạy lệnh)
+Cách chạy thứ 2 này sẽ lưu dữ liệu Redis ra thư mục redis-data trên host, tránh mất dữ liệu khi container dừng. (nhớ tạo thư mục redis-data trước khi chạy lệnh)
 
 Sau đó, cài thư viện redis-py: `pip install redis`
 Xem thêm tài liệu: https://pypi.org/project/redis/
