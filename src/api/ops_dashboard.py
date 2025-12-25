@@ -1,567 +1,610 @@
 # app/routers/ops_dashboard.py
 # -*- coding: utf-8 -*-
-
 """
-Dashboard vận hành (ops) dạng single-file:
-- HTML: /ops/dashboard  → Form đăng nhập (dùng /auth/login của bạn) + 3 biểu đồ + 2 bảng + nút Export Excel
-- JSON:  /ops/metrics/summary, /ops/metrics/top_suspicious, /ops/metrics/current_bans
-- Export: /ops/export/metrics.xlsx
+Ops Security Dashboard (production-oriented)
+
+Tệp này cung cấp "dashboard vận hành" (Ops) phục vụ giám sát bảo mật / an ninh theo thời gian thực.
+
+Các endpoint chính:
+- HTML:   GET  /ops/dashboard
+          → trả file tĩnh app/static/ops_dashboard.html (UI realtime)
+- SSE:    GET  /ops/sse
+          → stream snapshot metrics định kỳ (mặc định 2.5s/lần)
+- JSON:   GET  /ops/metrics/summary
+          → timeseries 10 phút gần nhất (dùng fallback/Excel)
+          GET  /ops/metrics/top_suspicious
+          GET  /ops/metrics/current_bans
+- Export: GET  /ops/export/metrics.xlsx
+          → xuất Excel tổng hợp
+
 Bảo vệ:
-- Tất cả API JSON/Export yêu cầu Authorization: Bearer <Access_token> (token từ /auth/login của bạn)
-- Chỉ người dùng có Privilege ∈ {"Admin","Boss"} mới truy cập /ops/* (trừ /ops/dashboard là HTML tĩnh)
+- Tất cả endpoint JSON/SSE/Export đều yêu cầu quyền Admin/Boss.
+- SSE thường khó gắn header Authorization nếu dùng EventSource, vì vậy hỗ trợ nhiều nguồn token:
+  (1) Query param ?token=...
+  (2) Header Authorization: Bearer <token>   (khuyến nghị nếu client dùng fetch-stream)
+  (3) Cookie 'access_token' (HttpOnly)       (tuỳ chọn)
 
-Lưu ý kỹ thuật:
-- Biểu đồ dùng Chart.js (time scale) + date-fns adapter, trục X là epoch ms (real time axis).
-- Tránh lỗi vẽ trắng: showDash() trước rồi mới bootstrap() tạo chart; và feed data dạng {x, y}.
-- Không dùng f-string cho HTML để không xung đột với JS template literal `${...}`.
+Ghi chú quan trọng cho production:
+- SSE là kết nối dài; nếu trong handler async bạn gọi Redis đồng bộ (sync) quá nặng, event-loop sẽ bị block.
+  Vì vậy phần SSE trong file này offload các thao tác Redis/verify token (sync) sang thread bằng asyncio.to_thread().
+- Nếu bạn đặt Nginx trước FastAPI, cần tắt buffering cho SSE (xem thêm header X-Accel-Buffering).
 """
 
-import io                                   # Tạo file Excel in-memory
-import time                                 # Tính bucket phút hiện tại
-from typing import Any                      # Type hint tổng quát
+from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import HTMLResponse, StreamingResponse
+# ===== Standard library =====
+import asyncio  # ✅ cho sleep + to_thread trong SSE
+import io       # ✅ tạo BytesIO để xuất Excel
+import json     # ✅ encode payload SSE
+import logging  # ✅ ghi log lỗi/exception
+import time     # ✅ minute bucket + UTC timestamp
+from pathlib import Path  # ✅ resolve đường dẫn file HTML tĩnh
+from typing import Any, Dict, List, Optional, Tuple  # ✅ type hints rõ ràng
 
-from auth.oauth2 import required_token_user            # ⬅️ Auth có sẵn của bạn (decode JWT)
-from security.redis_client import get_redis            # ⬅️ Redis client (connection pool)
-from security.keyspace import (                        # ⬅️ Bộ tạo key tập trung (đã tách riêng)
-    k_metric_req, k_metric_5xx, k_metric_bans
-)
+# ===== FastAPI =====
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, status  # ✅ core API
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse  # ✅ response types
 
-# Thư viện Excel (cài: pip install openpyxl)
-from openpyxl import Workbook
+# ===== Project imports (giữ theo dự án của bạn) =====
+from auth.oauth2 import get_info_user_via_token, required_token_user  # ✅ dùng sẵn của bạn
+from security.keyspace import k_metric_5xx, k_metric_bans, k_metric_req  # ✅ key builder cho redis
+from security.redis_client import get_redis  # ✅ redis client (sync)
+from db.database import get_db
 
-# ===== Khởi tạo Router & Redis =====
+# ===== Third-party =====
+from openpyxl import Workbook  # ✅ tạo file xlsx
+
+# =============================================================================
+# (0) Router + logger + redis client
+# =============================================================================
+
+# Tạo router với prefix /ops để gom endpoint vào 1 namespace.
 router = APIRouter(prefix="/ops", tags=["Ops Dashboard"])
-_r = get_redis()  # Redis singleton/pool dùng chung
+
+# Logger cho module này (để bạn xem lỗi trên stdout hoặc file log tuỳ cấu hình).
+logger = logging.getLogger(__name__)
+
+# Lấy redis client dùng chung.
+# LƯU Ý: get_redis() trong dự án bạn đang trả về client kiểu sync (redis-py).
+# Trong các endpoint sync thì OK, nhưng trong SSE async sẽ offload sang thread.
+_r = get_redis()
+
+# =============================================================================
+# (1) Config / constants (đặt tập trung để dễ chỉnh)
+# =============================================================================
+
+# Khoảng thời gian đẩy snapshot SSE (giây).
+SSE_INTERVAL_SECONDS: float = 2.5
+
+# Mặc định thống kê timeseries cho 10 phút gần nhất (tức 10 bucket phút).
+DEFAULT_WINDOW_MINUTES: int = 10
+
+# Giới hạn quét scan_iter mỗi vòng (tránh scan quá lớn).
+REDIS_SCAN_COUNT: int = 2000
+
+# Giới hạn số item suspicious trả về trong SSE (UI không cần quá nhiều).
+SSE_SUSPICIOUS_LIMIT: int = 50
+
+# Mỗi bao nhiêu giây thì SSE mới quét lại danh sách suspicious/bans (tránh quét liên tục).
+# Vì scan_iter + ttl rất tốn tài nguyên nếu làm 2.5s/lần.
+SSE_SCAN_REFRESH_SECONDS: float = 10.0
+
+# Quyền được phép xem dashboard ops
+OPS_ALLOWED_PRIVILEGES = {"Admin", "Boss"}
+
+# =============================================================================
+# (2) Helpers: privilege guard, token extraction, redis snapshot
+# =============================================================================
+
+def _get_privilege(user: Any) -> Optional[str]:
+    """
+    Lấy trường Privilege từ user object.
+    Hỗ trợ cả kiểu object (có attribute) và dict.
+    """
+    if isinstance(user, dict):
+        return user.get("Privilege")
+    return getattr(user, "Privilege", None)
 
 
-# ====== Guard quyền cho API /ops/* (trừ /ops/dashboard) ======
 def require_ops_admin(user: Any = Depends(required_token_user)) -> Any:
     """
-    - required_token_user: Dependency của bạn → giải mã JWT từ header Authorization: Bearer <Access_token>
-    - Chỉ cho phép Privilege 'Admin' hoặc 'Boss' truy cập các API JSON/Export.
-    - Trả lại object/dict user đã xác thực để dùng tiếp (nếu cần).
+    Dependency guard cho các endpoint JSON/Export (non-SSE) khi client gửi Authorization header.
+
+    - required_token_user: dependency của bạn (đã verify token).
+    - Sau khi có user, kiểm tra Privilege ∈ {Admin, Boss}.
+
+    Trả về user để endpoint có thể dùng thêm (nếu cần).
     """
-    # user có thể là pydantic model hoặc dict; lấy Privilege linh hoạt:
-    priv = getattr(user, "Privilege", None) if not isinstance(user, dict) else user.get("Privilege")
-    if priv not in {"Admin", "Boss"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privilege")
+    priv = _get_privilege(user)
+    if priv not in OPS_ALLOWED_PRIVILEGES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient privilege",
+        )
     return user
 
 
-# =======================
-# (1) HTML DASHBOARD
-# =======================
-@router.get("/dashboard", response_class=HTMLResponse, summary="Dashboard HTML (login + Chart.js time scale)")
-def ops_dashboard():
+def _extract_token_from_request(
+    request: Request,
+    token_from_query: str,
+    access_token_cookie: Optional[str],
+) -> str:
     """
-    Trả về một trang HTML độc lập, chứa:
-    - Form Login: gọi POST /auth/login (form-urlencoded: username, password) → nhận Access_token → lưu localStorage
-    - Sau khi login, show panel dashboard rồi bootstrap() vẽ 3 biểu đồ và 2 bảng
-    - Nút Export Excel: tải /ops/export/metrics.xlsx
+    Rút token từ 3 nguồn theo thứ tự ưu tiên:
+    1) Query param ?token=...
+    2) Header Authorization: Bearer <token>
+    3) Cookie access_token (HttpOnly)
+
+    Trả về token thô (không bao gồm chữ Bearer) hoặc raise 401 nếu không có.
     """
-    # ❗️KHÔNG dùng f-string để giữ nguyên ${...} trong JS.
-    html = """
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <title>Ops Dashboard</title>
+    # (1) query token (?token=...)
+    if token_from_query and token_from_query.strip():
+        return token_from_query.strip()
 
-  <!-- BẮT BUỘC: nạp date-fns trước adapter của Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/date-fns@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+    # (2) Authorization header
+    authz = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    authz = authz.strip()
+    if authz.lower().startswith("bearer "):
+        return authz.split(" ", 1)[1].strip()
 
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 16px; background: #fafafa; color: #222; }
-    .container { max-width: 1200px; margin: 0 auto; }
-    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-    h1 { font-size: 20px; margin: 0; }
-    .note { color: #666; font-size: 12px; }
-    .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 12px 12px 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04); margin-bottom: 14px; }
-    canvas { width: 100% !important; height: 300px !important; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border: 1px solid #eee; padding: 8px; font-size: 13px; }
-    th { background: #f9fafb; text-align: left; }
-    code { background: #f3f3f3; padding: 2px 6px; border-radius: 4px; }
-    .row { display: grid; grid-template-columns: 1fr; gap: 14px; }
-    @media (min-width: 1100px) { .row { grid-template-columns: 1.2fr 0.8fr; } }
-    .actions { display: flex; gap: 8px; align-items: center; }
-    .btn { border: 1px solid #ddd; background: #fff; padding: 6px 10px; border-radius: 8px; cursor: pointer; }
-    .btn:hover { background: #f6f6f6; }
-    .hidden { display: none; }
-    .error { color: #b40000; font-size: 12px; }
-    input[type=text], input[type=password] { padding: 8px; border-radius: 8px; border: 1px solid #ddd; width: 260px; }
-    label { font-size: 13px; color: #444; }
-  </style>
-</head>
-<body>
-<div class="container">
+    # (3) Cookie token
+    if access_token_cookie and access_token_cookie.strip():
+        return access_token_cookie.strip()
 
-  <header>
-    <h1>Ops Dashboard</h1>
-    <div class="note">Đăng nhập để xem số liệu. Tự refresh 5 giây/lần.</div>
-  </header>
+    # Không có token ở bất kỳ nguồn nào → 401
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
 
-  <!-- Panel Login -->
-  <div id="loginPanel" class="card">
-    <h2>Đăng nhập</h2>
-    <div style="display:flex; gap:12px; align-items:center; flex-wrap: wrap;">
-      <div>
-        <label>Email</label><br/>
-        <input id="email" type="text" placeholder="admin@example.com" />
-      </div>
-      <div>
-        <label>Password</label><br/>
-        <input id="password" type="password" placeholder="••••••••" />
-      </div>
-      <div style="align-self:flex-end;">
-        <button class="btn" onclick="login()">Login</button>
-      </div>
-      <div class="error" id="loginError"></div>
-    </div>
-  </div>
 
-  <!-- Panel Dashboard (ẩn trước, show sau khi login để tránh Chart.js vẽ khi width=0) -->
-  <div id="dashPanel" class="hidden">
-    <div class="row">
-      <div>
-        <div class="card">
-          <div class="actions">
-            <h2 style="margin-right:auto;">Requests / minute</h2>
-            <button class="btn" onclick="exportExcel()">Export Excel</button>
-            <button class="btn" onclick="logout()">Logout</button>
-          </div>
-          <canvas id="chartReq"></canvas>
-        </div>
-        <div class="card">
-          <h2>5xx / minute</h2>
-          <canvas id="chart5xx"></canvas>
-        </div>
-        <div class="card">
-          <h2>Bans / minute</h2>
-          <canvas id="chartBans"></canvas>
-        </div>
-      </div>
-      <div>
-        <div class="card">
-          <h2>Top Suspicious (điểm nghi vấn còn TTL)</h2>
-          <div id="suspicious"></div>
-        </div>
-        <div class="card">
-          <h2>Current Bans (IP đang bị BAN + TTL)</h2>
-          <div id="bans"></div>
-        </div>
-      </div>
-    </div>
-  </div>
+def _normalize_bearer(raw_token: str) -> str:
+    """
+    Chuẩn hoá token thành chuỗi dạng "Bearer <token>" để phù hợp với
+    get_info_user_via_token() (nhiều dự án của bạn yêu cầu prefix này).
+    """
+    t = (raw_token or "").strip()
+    if not t:
+        # Trường hợp này đã bị chặn từ _extract_token_from_request(), nhưng thêm check để an toàn.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
+    return t if t.lower().startswith("bearer ") else f"Bearer {t}"
 
-</div>
 
-<script>
-// ===== Token helpers: lưu token vào localStorage (đơn giản) =====
-function getToken() { return localStorage.getItem('ops_token') || ''; }
-function setToken(t) { localStorage.setItem('ops_token', t); }
-function clearToken() { localStorage.removeItem('ops_token'); }
+def _assert_ops_privilege(user: Any) -> None:
+    """
+    Kiểm tra quyền Ops (Admin/Boss). Nếu không đạt → raise 403.
+    """
+    priv = _get_privilege(user)
+    if priv not in OPS_ALLOWED_PRIVILEGES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privilege")
 
-// ===== Toggle UI =====
-function showLogin() { document.getElementById('loginPanel').classList.remove('hidden'); document.getElementById('dashPanel').classList.add('hidden'); }
-function showDash()  { document.getElementById('loginPanel').classList.add('hidden');   document.getElementById('dashPanel').classList.remove('hidden'); }
 
-// ===== Login dùng /auth/login của bạn (OAuth2PasswordRequestForm) =====
-async function login() {
-  const email = document.getElementById('email').value.trim();   // → request.username
-  const password = document.getElementById('password').value;    // → request.password
-  document.getElementById('loginError').innerText = '';
+def _minute_buckets(window_minutes: int) -> List[int]:
+    """
+    Tạo danh sách minute-bucket cho window N phút gần nhất.
+    Ví dụ window=10 → 10 bucket: now-9 ... now
+    """
+    # Lấy bucket phút hiện tại theo epoch minute.
+    now_min = int(time.time() // 60)
+    # Trả về list bucket liên tiếp.
+    return list(range(now_min - (window_minutes - 1), now_min + 1))
 
-  // /auth/login cần body dạng form-urlencoded
-  const body = new URLSearchParams({ username: email, password });
 
-  try {
-    const res = await fetch('/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body
-    });
-    if (!res.ok) {
-      const t = await res.json().catch(() => ({}));
-      throw new Error(t.detail?.message || ('HTTP ' + res.status));
-    }
-    const data = await res.json();
-    const token = data.Access_token;  // API của bạn trả "Access_token"
-    if (!token) throw new Error('Không nhận được Access_token');
+def _redis_get_timeseries(minute_buckets: List[int]) -> Dict[str, List[int]]:
+    """
+    Đọc 3 timeseries từ Redis theo bucket phút:
+    - Requests/min
+    - 5xx/min
+    - Bans/min
 
-    setToken(token);
+    LƯU Ý: _r.mget là sync, nên khi gọi từ SSE async phải offload bằng asyncio.to_thread().
+    """
+    # Tạo key list theo từng metric.
+    keys_req = [k_metric_req(m) for m in minute_buckets]
+    keys_5xx = [k_metric_5xx(m) for m in minute_buckets]
+    keys_ban = [k_metric_bans(m) for m in minute_buckets]
 
-    // ❗️Quan trọng: show panel trước, sau đó mới vẽ chart
-    showDash();
-    setTimeout(() => { bootstrap().catch(e => console.error(e)); }, 0);
-  } catch (e) {
-    document.getElementById('loginError').innerText = e.message || 'Login failed';
-  }
-}
+    # Redis mget trả về list bytes/str/None tuỳ cấu hình decode_responses.
+    v_req = _r.mget(keys_req)
+    v_5xx = _r.mget(keys_5xx)
+    v_ban = _r.mget(keys_ban)
 
-function logout() {
-  clearToken();
-  if (window.__opsInterval) clearInterval(window.__opsInterval);
-  showLogin();
-}
+    # Hàm convert an toàn: None → 0, bytes/str → int
+    def to_int(v: Any) -> int:
+        try:
+            if v is None:
+                return 0
+            # redis-py có thể trả bytes; int(b'123') sẽ lỗi, nên decode trước.
+            if isinstance(v, (bytes, bytearray)):
+                v = v.decode("utf-8", "ignore")
+            return int(v)
+        except Exception:
+            return 0
 
-// ===== Fetch JSON kèm Bearer token =====
-async function fetchJSON(url) {
-  const token = getToken();
-  const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
-  const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error(url + ' -> ' + res.status);
-  return res.json();
-}
-
-// ===== Chuyển minutes + values → mảng điểm {x (epoch ms), y} =====
-function toXY(minutes, values) {
-  const out = [];
-  for (let i = 0; i < minutes.length; i++) {
-    const ms = (minutes[i] || 0) * 60 * 1000;    // minute bucket → epoch ms
-    const v  = Number(values[i] || 0);
-    out.push({ x: ms, y: v });
-  }
-  return out;
-}
-
-// ===== Tạo Line chart theo time-scale, feed data dạng {x,y} (không cần labels) =====
-function createLineChart(canvasId, label, xy) {
-  const ctx = document.getElementById(canvasId).getContext('2d');
-  const chart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      datasets: [{
-        label,
-        data: xy,
-        tension: 0.25,
-        fill: false,
-        pointRadius: 2
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      parsing: true, // để Chart.js tự hiểu {x,y}
-      scales: {
-        x: { type: 'time', time: { unit: 'minute' } },
-        y: { beginAtZero: true }
-      },
-      plugins: { legend: { display: true }, tooltip: { enabled: true } }
-    }
-  });
-  chart.resize(); // đảm bảo vẽ sau khi có kích thước thực
-  return chart;
-}
-
-// ===== Tạo Bar chart theo time-scale, feed data {x,y} =====
-function createBarChart(canvasId, label, xy) {
-  const ctx = document.getElementById(canvasId).getContext('2d');
-  const chart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      datasets: [{
-        label,
-        data: xy
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      parsing: true,
-      scales: {
-        x: { type: 'time', time: { unit: 'minute' }, grid: { display: false } },
-        y: { beginAtZero: true }
-      },
-      plugins: { legend: { display: true }, tooltip: { enabled: true } }
-    }
-  });
-  chart.resize();
-  return chart;
-}
-
-// ===== Render bảng Top Suspicious =====
-function renderSuspicious(data) {
-  const rows = (data.items || []).map(it => `
-    <tr>
-      <td><code>${it.ip}</code></td>
-      <td>${it.score}</td>
-      <td>${it.ttl_seconds ?? '-'}</td>
-    </tr>
-  `).join('');
-  const html = `
-    <table>
-      <thead><tr><th>IP</th><th>Score (5min)</th><th>TTL(s)</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-  document.getElementById('suspicious').innerHTML = html;
-}
-
-// ===== Render bảng Current Bans =====
-function renderBans(data) {
-  const rows = (data.items || []).map(it => `
-    <tr>
-      <td><code>${it.ip}</code></td>
-      <td>${it.ttl_seconds}</td>
-    </tr>
-  `).join('');
-  const html = `
-    <table>
-      <thead><tr><th>IP</th><th>TTL(s)</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-  document.getElementById('bans').innerHTML = html;
-}
-
-// ===== Biến chart toàn cục =====
-let chartReq = null, chart5xx = null, chartBans = null;
-
-// ===== Khởi tạo sau khi login =====
-async function bootstrap() {
-  // (1) Lấy summary 10 phút gần nhất
-  const summary = await fetchJSON('/ops/metrics/summary');
-  const xyReq  = toXY(summary.minutes, summary.req);
-  const xy5xx  = toXY(summary.minutes, summary.s5xx);
-  const xyBans = toXY(summary.minutes, summary.bans);
-
-  // (2) Huỷ chart cũ (nếu có) để render lại trong trạng thái panel đã hiện
-  if (chartReq)  { chartReq.destroy();  chartReq = null; }
-  if (chart5xx)  { chart5xx.destroy();  chart5xx = null; }
-  if (chartBans) { chartBans.destroy(); chartBans = null; }
-
-  // (3) Tạo chart mới
-  chartReq  = createLineChart('chartReq',  'Requests/min', xyReq);
-  chart5xx  = createLineChart('chart5xx',  '5xx/min',      xy5xx);
-  chartBans = createBarChart ('chartBans', 'Bans/min',     xyBans);
-
-  // (4) Render 2 bảng
-  renderSuspicious(await fetchJSON('/ops/metrics/top_suspicious?limit=50'));
-  renderBans(await fetchJSON('/ops/metrics/current_bans'));
-
-  // (5) Bật auto refresh 5s/lần
-  if (window.__opsInterval) clearInterval(window.__opsInterval);
-  window.__opsInterval = setInterval(refresh, 5000);
-}
-
-// ===== Refresh định kỳ =====
-async function refresh() {
-  try {
-    const summary = await fetchJSON('/ops/metrics/summary');
-    const xyReq  = toXY(summary.minutes, summary.req);
-    const xy5xx  = toXY(summary.minutes, summary.s5xx);
-    const xyBans = toXY(summary.minutes, summary.bans);
-
-    if (chartReq && chart5xx && chartBans) {
-      chartReq.data.datasets[0].data  = xyReq;
-      chart5xx.data.datasets[0].data  = xy5xx;
-      chartBans.data.datasets[0].data = xyBans;
-      chartReq.update('none');
-      chart5xx.update('none');
-      chartBans.update('none');
-    } else {
-      // Nếu vì lý do gì chart bị null (VD: hot reload), khởi tạo lại
-      await bootstrap();
-      return;
+    return {
+        "req": [to_int(x) for x in v_req],
+        "s5xx": [to_int(x) for x in v_5xx],
+        "bans": [to_int(x) for x in v_ban],
     }
 
-    const [susp, bans] = await Promise.all([
-      fetchJSON('/ops/metrics/top_suspicious?limit=50'),
-      fetchJSON('/ops/metrics/current_bans')
-    ]);
-    renderSuspicious(susp);
-    renderBans(bans);
-  } catch (e) {
-    console.error('refresh error', e);
-    // Token hết hạn/không hợp lệ → tự logout
-    if (String(e).includes('401')) { logout(); }
-  }
-}
 
-// ===== Nếu đã có token (đăng nhập lần trước) → vào thẳng dashboard =====
-(function init() {
-  if (getToken()) {
-    showDash();                              // show panel trước
-    setTimeout(() => {                       // cho layout ổn định rồi vẽ
-      bootstrap().catch(() => logout());
-    }, 0);
-  } else {
-    showLogin();
-  }
-})();
-</script>
+def _scan_suspicious_top(limit: int) -> List[Dict[str, Any]]:
+    """
+    Quét các key dạng sus:ip:*:5min và trả danh sách top nghi vấn.
 
-</body>
-</html>
-"""
-    return HTMLResponse(html)
+    Tối ưu:
+    - scan_iter để lấy danh sách key (có giới hạn count)
+    - pipeline GET + TTL để giảm round-trip
+    """
+    # Thu thập key suspicious (giới hạn số key xử lý để tránh quá tải).
+    keys: List[bytes] = []
+    for k in _r.scan_iter(match=b"sus:ip:*:5min", count=REDIS_SCAN_COUNT):
+        keys.append(k)
+        # Hard cap để bảo vệ server nếu key quá nhiều.
+        if len(keys) >= 5000:
+            break
+
+    if not keys:
+        return []
+
+    # Pipeline GET + TTL theo cặp (get, ttl) cho từng key.
+    pipe = _r.pipeline()
+    for k in keys:
+        pipe.get(k)
+        pipe.ttl(k)
+    results = pipe.execute()
+
+    # Parse kết quả.
+    out: List[Dict[str, Any]] = []
+    prefix, suffix = "sus:ip:", ":5min"
+    for i, k in enumerate(keys):
+        # Mỗi key có 2 result: get và ttl.
+        v_score = results[2 * i]
+        v_ttl = results[2 * i + 1]
+
+        # Decode key để lấy IP
+        k_str = k.decode("utf-8", "ignore")
+        if not (k_str.startswith(prefix) and k_str.endswith(suffix)):
+            continue
+        ip = k_str[len(prefix) : -len(suffix)]
+
+        # Convert score/ttl an toàn
+        try:
+            if isinstance(v_score, (bytes, bytearray)):
+                v_score = v_score.decode("utf-8", "ignore")
+            score = int(v_score or 0)
+        except Exception:
+            score = 0
+
+        try:
+            ttl = int(v_ttl) if v_ttl is not None else -1
+        except Exception:
+            ttl = -1
+
+        out.append(
+            {
+                "ip": ip,
+                "score": score,
+                # ttl<=0 nghĩa là không tồn tại hoặc không có expiry, ta trả None để UI hiển thị "-"
+                "ttl_seconds": ttl if ttl and ttl > 0 else None,
+            }
+        )
+
+    # Sort theo score giảm dần, tie-break theo ttl (ttl lớn hơn ưu tiên hơn tuỳ bạn).
+    out.sort(key=lambda x: (x["score"], x["ttl_seconds"] or 0), reverse=True)
+    return out[: max(1, limit)]
 
 
-# =======================
-# (2) API: SUMMARY (10 phút gần nhất)
-# =======================
+def _scan_current_bans() -> List[Dict[str, Any]]:
+    """
+    Quét các key dạng ban:ip:* và trả danh sách đang ban (có TTL > 0).
+    Pipeline TTL để giảm round-trip.
+    """
+    keys: List[bytes] = []
+    for k in _r.scan_iter(match=b"ban:ip:*", count=REDIS_SCAN_COUNT):
+        keys.append(k)
+        if len(keys) >= 5000:
+            break
+
+    if not keys:
+        return []
+
+    # Pipeline TTL theo từng key
+    pipe = _r.pipeline()
+    for k in keys:
+        pipe.ttl(k)
+    ttls = pipe.execute()
+
+    out: List[Dict[str, Any]] = []
+    prefix = "ban:ip:"
+    for k, ttl in zip(keys, ttls):
+        k_str = k.decode("utf-8", "ignore")
+        if not k_str.startswith(prefix):
+            continue
+        ip = k_str[len(prefix) :]
+
+        try:
+            ttl_int = int(ttl) if ttl is not None else -1
+        except Exception:
+            ttl_int = -1
+
+        # Chỉ lấy bans còn TTL
+        if ttl_int and ttl_int > 0:
+            out.append({"ip": ip, "ttl_seconds": ttl_int})
+
+    # TTL tăng dần (ai sắp hết hạn hiển thị trước)
+    out.sort(key=lambda x: x["ttl_seconds"])
+    return out
+
+
+def _build_snapshot_payload(
+    window_minutes: int,
+    suspicious_limit: int,
+    include_scans: bool,
+) -> Dict[str, Any]:
+    """
+    Tạo payload đầy đủ cho SSE:
+    - timeseries window_minutes gần nhất
+    - (tuỳ chọn) quét suspicious + current bans
+
+    include_scans=False để tái sử dụng dữ liệu quét trước đó (giảm tải).
+    """
+    minutes = _minute_buckets(window_minutes)
+    series = _redis_get_timeseries(minutes)
+
+    payload: Dict[str, Any] = {
+        "minutes": minutes,
+        "req": series["req"],
+        "s5xx": series["s5xx"],
+        "bans": series["bans"],
+    }
+
+    if include_scans:
+        susp_items = _scan_suspicious_top(suspicious_limit)
+        ban_items = _scan_current_bans()
+        payload["suspicious"] = {"count": len(susp_items), "items": susp_items}
+        payload["current_bans"] = {"items": ban_items}
+
+    return payload
+
+
+# =============================================================================
+# (3) (A) HTML dashboard: trả file tĩnh
+# =============================================================================
+
+@router.get("/dashboard", response_class=HTMLResponse, summary="Dashboard HTML tách file")
+def ops_dashboard_html() -> FileResponse:
+    """
+    Trả file HTML tĩnh.
+
+    LƯU Ý:
+    - Path(__file__).resolve().parents[1] giả định cấu trúc: app/routers/ops_dashboard.py
+      và app/static/ops_dashboard.html.
+    - Nếu bạn đổi cấu trúc, hãy điều chỉnh parents[...] cho đúng.
+    """
+    html_path = Path(__file__).resolve().parents[1] / "static" / "ops_dashboard.html"
+    if not html_path.exists():
+        raise HTTPException(status_code=500, detail=f"Không tìm thấy file: {html_path}")
+    return FileResponse(str(html_path), media_type="text/html; charset=utf-8")
+
+
+# =============================================================================
+# (4) (B) SSE: realtime metrics
+# =============================================================================
+
+@router.get("/sse", summary="Server-Sent Events: realtime metrics")
+async def sse_metrics(
+    request: Request,
+    token: str = Query("", alias="token"),
+    access_token: Optional[str] = Cookie(default=None),
+):
+    # 1) Lấy token thô từ request (query → header → cookie)
+    raw_token = _extract_token_from_request(request, token, access_token)
+
+    # 2) Chuẩn hoá token dạng "Bearer ..." (phục vụ nhất quán)
+    normalized = _normalize_bearer(raw_token)
+
+    # 3) Vì get_info_user_via_token() đang dùng Depends(get_db),
+    #    nên nếu bạn gọi trực tiếp như function thì FastAPI KHÔNG inject db.
+    #    Ta sẽ tự tạo DB session và truyền thẳng vào tham số db=...
+    #
+    #    Đồng thời: jwt.decode trong get_info_user_via_token() thường cần RAW JWT,
+    #    không cần "Bearer ". Vì vậy ta strip "Bearer " nếu có.
+    jwt_token = normalized.split(" ", 1)[1].strip()  # bỏ "Bearer "
+
+    # 4) Tạo helper chạy trong thread:
+    #    - tạo session trong chính thread đó (Session không thread-safe)
+    #    - gọi get_info_user_via_token(token=..., db=...)
+    #    - đảm bảo đóng session
+    def _verify_user_in_thread(token_str: str):
+        db_gen = get_db()  # generator yield Session
+        db = next(db_gen)  # lấy Session thật
+
+        try:
+            # ✅ gọi function giữ nguyên cấu trúc, nhưng truyền token & db thật
+            return get_info_user_via_token(token=token_str, db=db)
+        finally:
+            # đóng generator để trigger finally trong get_db() (đóng session)
+            db_gen.close()
+
+    # 5) Verify token + lấy user (chạy trong thread để không block event-loop)
+    try:
+        user = await asyncio.to_thread(_verify_user_in_thread, jwt_token)
+    except HTTPException as ex:
+        # nếu get_info_user_via_token raise HTTPException (401) thì giữ nguyên
+        logger.warning("SSE auth failed: %s", ex)
+        raise
+    except StopIteration:
+        # trường hợp get_db() không yield được session (hiếm, nhưng nên bắt)
+        logger.exception("SSE auth failed: get_db() did not yield a session")
+        raise HTTPException(status_code=500, detail="Database session unavailable")
+    except Exception as ex:
+        logger.warning("SSE auth failed: %s", ex)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+    # 6) Nếu token không có hoặc decode fail mà bạn return None, chặn luôn:
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+    # 7) Kiểm quyền ops
+    _assert_ops_privilege(user)
+
+    # 8) Generator SSE
+    async def _gen():
+        yield "retry: 2500\n\n"
+
+        last_scan_ts = 0.0
+        cached_susp: Dict[str, Any] = {"count": 0, "items": []}
+        cached_bans: Dict[str, Any] = {"items": []}
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            try:
+                now = time.time()
+                need_scan = (now - last_scan_ts) >= SSE_SCAN_REFRESH_SECONDS
+
+                payload = await asyncio.to_thread(
+                    _build_snapshot_payload,
+                    DEFAULT_WINDOW_MINUTES,
+                    SSE_SUSPICIOUS_LIMIT,
+                    need_scan,
+                )
+
+                if need_scan:
+                    cached_susp = payload.get("suspicious", cached_susp)
+                    cached_bans = payload.get("current_bans", cached_bans)
+                    last_scan_ts = now
+                else:
+                    payload["suspicious"] = cached_susp
+                    payload["current_bans"] = cached_bans
+
+                data = json.dumps(payload, ensure_ascii=False)
+                yield f"event: metrics\ndata: {data}\n\n"
+
+            except asyncio.CancelledError:
+                break
+            except Exception as ex:
+                logger.exception("SSE loop error: %s", ex)
+                yield ":keepalive\n\n"
+
+            await asyncio.sleep(SSE_INTERVAL_SECONDS)
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+
+    return StreamingResponse(_gen(), media_type="text/event-stream; charset=utf-8", headers=headers)
+
+
+# =============================================================================
+# (5) (C) API: Summary timeseries (10 phút gần nhất) – dùng fallback/Excel
+# =============================================================================
+
 @router.get("/metrics/summary", summary="Timeseries req/min, 5xx/min, bans/min (10 phút gần nhất)")
 def metrics_summary(_: Any = Depends(require_ops_admin)):
     """
-    Trả timeseries 10 phút gần nhất:
-    - minutes: list[int] bucket phút (floor(epoch_sec/60))
-    - req/s5xx/bans: list[int] cùng độ dài với minutes
-    UI sẽ nhân minutes * 60 * 1000 để vẽ trục thời gian thực (ms).
+    Endpoint JSON trả timeseries 10 phút gần nhất.
+    - Dùng cho fallback nếu SSE có vấn đề.
+    - Dùng để kiểm tra nhanh server/redis.
     """
-    now_min = int(time.time() // 60)                  # phút hiện tại (epoch minutes)
-    minutes = list(range(now_min - 9, now_min + 1))  # 10 bucket (cũ → mới)
-
-    # Batch keys theo từng dòng metric
-    keys_req  = [k_metric_req(m)  for m in minutes]
-    keys_5xx  = [k_metric_5xx(m)  for m in minutes]
-    keys_bans = [k_metric_bans(m) for m in minutes]
-
-    # Đọc nhanh bằng MGET (trả list[bytes|None])
-    v_req  = _r.mget(keys_req)
-    v_5xx  = _r.mget(keys_5xx)
-    v_bans = _r.mget(keys_bans)
-
-    # Chuyển sang int (None → 0)
-    to_int = lambda v: int(v) if v is not None else 0
-
-    return {
-        "minutes": minutes,
-        "req":  [to_int(x) for x in v_req],
-        "s5xx": [to_int(x) for x in v_5xx],
-        "bans": [to_int(x) for x in v_bans]
-    }
+    minutes = _minute_buckets(DEFAULT_WINDOW_MINUTES)
+    series = _redis_get_timeseries(minutes)
+    return {"minutes": minutes, **series}
 
 
-# =======================
-# (3) API: Top-N IP nghi vấn (còn TTL)
-# =======================
+# =============================================================================
+# (6) (D) API: Top-N suspicious
+# =============================================================================
+
 @router.get("/metrics/top_suspicious", summary="Top-N IP nghi vấn còn TTL (quét sus:ip:*:5min)")
 def top_suspicious(limit: int = 50, _: Any = Depends(require_ops_admin)):
     """
-    Quét các key 'sus:ip:*:5min' còn TTL, đọc score và TTL, sắp theo score giảm dần.
-    Lưu ý: Đây là "điểm nghi vấn" trong cửa sổ 5 phút (middleware tăng khi vượt rate/pattern xấu/UA rỗng).
+    Trả Top-N IP nghi vấn.
+    - limit mặc định 50.
+    - Quét trực tiếp redis (sync endpoint → FastAPI chạy trong threadpool).
     """
-    items = []
-    for k in _r.scan_iter(match=b"sus:ip:*:5min", count=2000):
-        k_str = k.decode("utf-8", "ignore")
-        prefix, suffix = "sus:ip:", ":5min"
-        if not (k_str.startswith(prefix) and k_str.endswith(suffix)):
-            continue
-        ip = k_str[len(prefix):-len(suffix)]
-        try:
-            score = int(_r.get(k) or 0)
-        except Exception:
-            score = 0
-        ttl = _r.ttl(k)  # giây (None khi không có TTL hoặc -1/-2 theo Redis → normalize bên UI)
-        items.append({"ip": ip, "score": score, "ttl_seconds": (ttl if ttl and ttl > 0 else None)})
-
-    items.sort(key=lambda x: (x["score"], x["ttl_seconds"] or 0), reverse=True)
-    return {"count": min(limit, len(items)), "items": items[:limit]}
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=400, detail="limit phải trong [1, 500]")
+    items = _scan_suspicious_top(limit)
+    return {"count": len(items), "items": items}
 
 
-# =======================
-# (4) API: IP đang bị BAN + TTL
-# =======================
+# =============================================================================
+# (7) (E) API: Current bans
+# =============================================================================
+
 @router.get("/metrics/current_bans", summary="Danh sách IP đang bị BAN + TTL")
 def current_bans(_: Any = Depends(require_ops_admin)):
     """
-    Liệt kê IP đang bị BAN: duyệt key 'ban:ip:*' và lấy TTL > 0.
+    Trả danh sách ip bị ban còn TTL.
     """
-    out = []
-    for k in _r.scan_iter(match=b"ban:ip:*", count=2000):
-        k_str = k.decode("utf-8", "ignore")
-        prefix = "ban:ip:"
-        if not k_str.startswith(prefix):
-            continue
-        ip = k_str[len(prefix):]
-        ttl = _r.ttl(k)
-        if ttl and ttl > 0:
-            out.append({"ip": ip, "ttl_seconds": ttl})
-    out.sort(key=lambda x: x["ttl_seconds"])  # TTL tăng dần
-    return {"items": out}
+    items = _scan_current_bans()
+    return {"items": items}
 
 
-# =======================
-# (5) EXPORT EXCEL (3 sheet)
-# =======================
+# =============================================================================
+# (8) (F) Export Excel
+# =============================================================================
+
 @router.get("/export/metrics.xlsx", summary="Xuất Excel tổng hợp (summary + suspicious + bans)")
-def export_excel(minutes: int = 10, _: Any = Depends(require_ops_admin)):
+def export_excel(minutes: int = DEFAULT_WINDOW_MINUTES, _: Any = Depends(require_ops_admin)):
     """
-    Tạo file Excel (.xlsx) in-memory:
-    - Sheet 'Summary': MinuteBucket, Timestamp(UTC), Requests, 5xx, Bans
-    - Sheet 'TopSuspicious': IP, Score(5min), TTL(s)
-    - Sheet 'CurrentBans': IP, TTL(s)
+    Xuất file Excel gồm 3 sheet:
+    - Summary (timeseries theo minute bucket)
+    - TopSuspicious
+    - CurrentBans
+
+    minutes: số phút cần xuất (1..240). Mặc định 10.
     """
+    # Validate input
     if minutes < 1 or minutes > 240:
         raise HTTPException(status_code=400, detail="minutes phải trong [1, 240]")
 
-    now_min = int(time.time() // 60)
-    mins = list(range(now_min - (minutes - 1), now_min + 1))
+    # 1) Timeseries theo bucket phút
+    mins = _minute_buckets(minutes)
+    series = _redis_get_timeseries(mins)
 
-    keys_req  = [k_metric_req(m)  for m in mins]
-    keys_5xx  = [k_metric_5xx(m)  for m in mins]
-    keys_bans = [k_metric_bans(m) for m in mins]
-    v_req  = _r.mget(keys_req)
-    v_5xx  = _r.mget(keys_5xx)
-    v_bans = _r.mget(keys_bans)
+    # 2) Quét suspicious/bans
+    susp_items = _scan_suspicious_top(limit=500)  # Excel cho phép nhiều hơn SSE
+    ban_items = _scan_current_bans()
 
-    to_int = lambda v: int(v) if v is not None else 0
-
+    # 3) Tạo workbook
     wb = Workbook()
 
-    # --- Summary ---
+    # --- Sheet 1: Summary ---
     ws1 = wb.active
     ws1.title = "Summary"
     ws1.append(["MinuteBucket", "Timestamp(UTC)", "Requests", "5xx", "Bans"])
-    for m, r, s5, b in zip(mins, v_req, v_5xx, v_bans):
-        # Hiển thị thời gian UTC đơn giản; nếu cần theo timezone VN: dùng datetime + pytz/zoneinfo
+    for m, req, s5xx, bans in zip(mins, series["req"], series["s5xx"], series["bans"]):
         iso_utc = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(m * 60))
-        ws1.append([m, iso_utc, to_int(r), to_int(s5), to_int(b)])
+        ws1.append([m, iso_utc, req, s5xx, bans])
 
-    # --- TopSuspicious ---
+    # --- Sheet 2: TopSuspicious ---
     ws2 = wb.create_sheet("TopSuspicious")
     ws2.append(["IP", "Score(5min)", "TTL(s)"])
-    susp = []
-    for k in _r.scan_iter(match=b"sus:ip:*:5min", count=2000):
-        k_str = k.decode("utf-8", "ignore")
-        prefix, suffix = "sus:ip:", ":5min"
-        if not (k_str.startswith(prefix) and k_str.endswith(suffix)): continue
-        ip = k_str[len(prefix):-len(suffix)]
-        try: score = int(_r.get(k) or 0)
-        except: score = 0
-        ttl = _r.ttl(k)
-        susp.append((ip, score, ttl if ttl and ttl > 0 else None))
-    susp.sort(key=lambda x: (x[1], x[2] or 0), reverse=True)
-    for ip, score, ttl in susp:
-        ws2.append([ip, score, ttl])
+    for it in susp_items:
+        ws2.append([it.get("ip"), it.get("score"), it.get("ttl_seconds")])
 
-    # --- CurrentBans ---
+    # --- Sheet 3: CurrentBans ---
     ws3 = wb.create_sheet("CurrentBans")
     ws3.append(["IP", "TTL(s)"])
-    bans = []
-    for k in _r.scan_iter(match=b"ban:ip:*", count=2000):
-        k_str = k.decode("utf-8", "ignore")
-        prefix = "ban:ip:"
-        if not k_str.startswith(prefix): continue
-        ip = k_str[len(prefix):]
-        ttl = _r.ttl(k)
-        if ttl and ttl > 0: bans.append((ip, ttl))
-    bans.sort(key=lambda x: x[1])
-    for ip, ttl in bans:
-        ws3.append([ip, ttl])
+    for it in ban_items:
+        ws3.append([it.get("ip"), it.get("ttl_seconds")])
 
-    # Gói vào bytes và trả về dưới dạng streaming
+    # 4) Ghi workbook vào memory (BytesIO) để trả về StreamingResponse
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
 
-    headers = {"Content-Disposition": 'attachment; filename="ops_metrics.xlsx"'}
+    # 5) Headers tải file
+    headers = {
+        "Content-Disposition": 'attachment; filename="ops_metrics.xlsx"',
+        "Cache-Control": "no-store",
+    }
+
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers=headers
+        headers=headers,
     )

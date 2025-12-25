@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ops Security Dashboard (Realtime)</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+    <style>
+      :root {
+        --border: #e5e7eb;
+        --muted: #6b7280;
+        --bg: #fafafa;
+      }
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        margin: 0;
+        padding: 16px;
+        background: var(--bg);
+        color: #111;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0;
+      }
+      .note {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px 12px 16px;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        margin-bottom: 14px;
+      }
+      canvas {
+        width: 100% !important;
+        height: 300px !important;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th,
+      td {
+        border: 1px solid var(--border);
+        padding: 8px;
+        font-size: 13px;
+      }
+      th {
+        background: #f9fafb;
+        text-align: left;
+      }
+      code {
+        background: #f3f4f6;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 14px;
+      }
+      @media (min-width: 1100px) {
+        .row {
+          grid-template-columns: 1.2fr 0.8fr;
+        }
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .btn {
+        border: 1px solid var(--border);
+        background: #fff;
+        padding: 6px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .btn:hover {
+        background: #f6f6f6;
+      }
+      .hidden {
+        display: none;
+      }
+      .error {
+        color: #b40000;
+        font-size: 12px;
+      }
+      input[type="text"],
+      input[type="password"] {
+        padding: 8px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        width: 260px;
+      }
+      label {
+        font-size: 13px;
+        color: #444;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="container">
+      <header>
+        <h1>Ops Security Dashboard</h1>
+        <div class="note">Đăng nhập → lưu token → mở SSE → realtime.</div>
+      </header>
+
+      <div id="loginPanel" class="card">
+        <h2>Đăng nhập</h2>
+        <div
+          style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap"
+        >
+          <div>
+            <label>Email</label><br />
+            <input id="email" type="text" placeholder="admin@example.com" />
+          </div>
+          <div>
+            <label>Password</label><br />
+            <input id="password" type="password" placeholder="••••••••" />
+          </div>
+          <div style="align-self: flex-end">
+            <button class="btn" onclick="login()">Login</button>
+          </div>
+          <div class="error" id="loginError"></div>
+        </div>
+      </div>
+
+      <div id="dashPanel" class="hidden">
+        <div class="row">
+          <div>
+            <div class="card">
+              <div class="actions">
+                <h2 style="margin-right: auto">Requests / minute</h2>
+                <button class="btn" onclick="exportExcel()">
+                  Export Excel
+                </button>
+                <button class="btn" onclick="logout()">Logout</button>
+              </div>
+              <canvas id="chartReq"></canvas>
+            </div>
+            <div class="card">
+              <h2>5xx / minute</h2>
+              <canvas id="chart5xx"></canvas>
+            </div>
+            <div class="card">
+              <h2>Bans / minute</h2>
+              <canvas id="chartBans"></canvas>
+            </div>
+          </div>
+
+          <div>
+            <div class="card">
+              <h2>Top Suspicious</h2>
+              <div id="suspicious"></div>
+            </div>
+            <div class="card">
+              <h2>Current Bans</h2>
+              <div id="bans"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ==========================
+      // 0) Token helpers (ROBUST)
+      // ==========================
+      function stripBearer(t) {
+        // Lưu token ở localStorage dưới dạng "raw JWT" (không kèm "Bearer ").
+        // Nếu server trả về "Bearer xxx" thì ta strip để tránh ghép "Bearer Bearer xxx" ở header.
+        return String(t || "")
+          .replace(/^bearer\\s+/i, "")
+          .trim();
+      }
+
+      function authHeaderValue() {
+        // Luôn dựng Authorization đúng chuẩn: "Bearer <raw>"
+        const raw = stripBearer(localStorage.getItem("ops_token") || "");
+        return raw ? "Bearer " + raw : "";
+      }
+
+      function getTokenRaw() {
+        // Lấy raw token để dùng cho query (?token=...) nếu cần fallback
+        return stripBearer(localStorage.getItem("ops_token") || "");
+      }
+
+      function setTokenRaw(t) {
+        localStorage.setItem("ops_token", stripBearer(t));
+      }
+
+      function clearToken() {
+        localStorage.removeItem("ops_token");
+      }
+
+      // ========================
+      // 1) Toggle UI
+      // ========================
+      function showLogin() {
+        document.getElementById("loginPanel").classList.remove("hidden");
+        document.getElementById("dashPanel").classList.add("hidden");
+      }
+
+      function showDash() {
+        document.getElementById("loginPanel").classList.add("hidden");
+        document.getElementById("dashPanel").classList.remove("hidden");
+      }
+
+      // ========================
+      // 2) Login → lấy token
+      // ========================
+      async function login() {
+        const email = document.getElementById("email").value.trim();
+        const password = document.getElementById("password").value;
+        document.getElementById("loginError").innerText = "";
+
+        const body = new URLSearchParams({ username: email, password });
+
+        try {
+          const res = await fetch("/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body,
+          });
+
+          if (!res.ok) {
+            const t = await res.json().catch(() => ({}));
+            throw new Error(
+              t.detail?.message || t.detail || "HTTP " + res.status
+            );
+          }
+
+          const data = await res.json();
+
+          // Robust: hỗ trợ nhiều key tên trường token (tránh mismatch khi backend đổi field)
+          const token =
+            data.Access_token ||
+            data.access_token ||
+            data.token ||
+            data.AccessToken ||
+            "";
+
+          if (!token) throw new Error("Không nhận được token từ /auth/login");
+
+          // Lưu dạng raw (không kèm Bearer)
+          setTokenRaw(token);
+
+          showDash();
+          setTimeout(() => bootstrap(), 0);
+        } catch (e) {
+          document.getElementById("loginError").innerText =
+            e.message || "Login failed";
+        }
+      }
+
+      // ========================
+      // 3) Logout: đóng SSE + xoá token
+      // ========================
+      let __sseAbort = null;
+
+      function logout() {
+        clearToken();
+        if (__sseAbort) {
+          __sseAbort.abort();
+          __sseAbort = null;
+        }
+        showLogin();
+      }
+
+      // ========================
+      // 4) Chart helpers
+      // ========================
+      let chartReq = null,
+        chart5xx = null,
+        chartBans = null;
+
+      function toXY(minutes, values) {
+        const out = [];
+        for (let i = 0; i < minutes.length; i++) {
+          const ms = (minutes[i] || 0) * 60 * 1000;
+          out.push({ x: ms, y: Number(values[i] || 0) });
+        }
+        return out;
+      }
+
+      function createLineChart(canvasId, label, xy) {
+        const ctx = document.getElementById(canvasId).getContext("2d");
+        const chart = new Chart(ctx, {
+          type: "line",
+          data: {
+            datasets: [
+              { label, data: xy, tension: 0.25, fill: false, pointRadius: 2 },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            parsing: true,
+            scales: {
+              x: { type: "time", time: { unit: "minute" } },
+              y: { beginAtZero: true },
+            },
+          },
+        });
+        chart.resize();
+        return chart;
+      }
+
+      function createBarChart(canvasId, label, xy) {
+        const ctx = document.getElementById(canvasId).getContext("2d");
+        const chart = new Chart(ctx, {
+          type: "bar",
+          data: { datasets: [{ label, data: xy }] },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            parsing: true,
+            scales: {
+              x: {
+                type: "time",
+                time: { unit: "minute" },
+                grid: { display: false },
+              },
+              y: { beginAtZero: true },
+            },
+          },
+        });
+        chart.resize();
+        return chart;
+      }
+
+      function renderSuspicious(data) {
+        const rows = (data.items || [])
+          .map(
+            (it) => `
+          <tr><td><code>${it.ip}</code></td><td>${it.score}</td><td>${
+              it.ttl_seconds ?? "-"
+            }</td></tr>
+        `
+          )
+          .join("");
+        document.getElementById("suspicious").innerHTML = `
+          <table>
+            <thead><tr><th>IP</th><th>Score</th><th>TTL(s)</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+      }
+
+      function renderBans(data) {
+        const rows = (data.items || [])
+          .map(
+            (it) => `
+          <tr><td><code>${it.ip}</code></td><td>${it.ttl_seconds}</td></tr>
+        `
+          )
+          .join("");
+        document.getElementById("bans").innerHTML = `
+          <table>
+            <thead><tr><th>IP</th><th>TTL(s)</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+      }
+
+      // ========================
+      // 5) SSE connect (Fetch-stream)
+      // ========================
+      let __retry = { n: 0, max: 6 };
+
+      function backoffDelay() {
+        const base = 1000;
+        const n = Math.min(__retry.n, __retry.max);
+        return base * Math.pow(2, n);
+      }
+
+      function resetBackoff() {
+        __retry.n = 0;
+      }
+
+      async function sseFetchConnect() {
+        const authz = authHeaderValue();
+        if (!authz) {
+          logout();
+          return;
+        }
+
+        if (__sseAbort) {
+          __sseAbort.abort();
+          __sseAbort = null;
+        }
+        const ctrl = new AbortController();
+        __sseAbort = ctrl;
+
+        try {
+          // Gắn Authorization header. Nếu Nginx không forward Authorization, bạn phải sửa Nginx (hướng dẫn bên dưới).
+          const res = await fetch("/ops/sse", {
+            method: "GET",
+            headers: { Accept: "text/event-stream", Authorization: authz },
+            cache: "no-store",
+            signal: ctrl.signal,
+          });
+
+          if (res.status === 401 || res.status === 403) {
+            alert(
+              "Phiên đăng nhập đã hết hạn hoặc không có quyền. Vui lòng đăng nhập lại."
+            );
+            logout();
+            return;
+          }
+          if (!res.ok || !res.body) throw new Error("SSE HTTP " + res.status);
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder("utf-8");
+          let buffer = "";
+
+          const processChunk = (text) => {
+            buffer += text;
+            let idx;
+            while ((idx = buffer.indexOf("\\n\\n")) !== -1) {
+              const block = buffer.slice(0, idx);
+              buffer = buffer.slice(idx + 2);
+
+              let event = "message";
+              let data = "";
+              for (const line of block.split("\\n")) {
+                const l = line.trimEnd();
+                if (l.startsWith("event:")) event = l.slice(6).trim();
+                else if (l.startsWith("data:")) data += l.slice(5).trim();
+              }
+
+              if (event === "metrics" && data) {
+                try {
+                  const payload = JSON.parse(data);
+
+                  const xyReq = toXY(payload.minutes, payload.req);
+                  const xy5xx = toXY(payload.minutes, payload.s5xx);
+                  const xyBans = toXY(payload.minutes, payload.bans);
+
+                  chartReq.data.datasets[0].data = xyReq;
+                  chart5xx.data.datasets[0].data = xy5xx;
+                  chartBans.data.datasets[0].data = xyBans;
+
+                  chartReq.update("none");
+                  chart5xx.update("none");
+                  chartBans.update("none");
+
+                  renderSuspicious(payload.suspicious || { items: [] });
+                  renderBans(payload.current_bans || { items: [] });
+
+                  resetBackoff();
+                } catch (e) {
+                  console.error("metrics parse error", e);
+                }
+              }
+            }
+          };
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            processChunk(decoder.decode(value, { stream: true }));
+          }
+
+          // Stream ended → reconnect with backoff
+          if (__sseAbort === ctrl) {
+            __sseAbort = null;
+            __retry.n++;
+            setTimeout(sseFetchConnect, backoffDelay());
+          }
+        } catch (err) {
+          // Nếu token không còn hợp lệ → logout, nếu mạng lỗi → backoff reconnect
+          try {
+            const res = await fetch("/ops/metrics/summary", {
+              headers: { Authorization: authHeaderValue() },
+            });
+            if (res.status === 401 || res.status === 403) {
+              alert(
+                "Phiên đăng nhập đã hết hạn hoặc không có quyền. Vui lòng đăng nhập lại."
+              );
+              logout();
+              return;
+            }
+          } catch (_) {
+            /* network issue */
+          }
+
+          if (__sseAbort) {
+            __retry.n++;
+            setTimeout(sseFetchConnect, backoffDelay());
+          }
+        }
+      }
+
+      // ========================
+      // 6) Bootstrap + Export
+      // ========================
+      function bootstrap() {
+        chartReq = createLineChart("chartReq", "Requests/min", []);
+        chart5xx = createLineChart("chart5xx", "5xx/min", []);
+        chartBans = createBarChart("chartBans", "Bans/min", []);
+        resetBackoff();
+        sseFetchConnect();
+      }
+
+      async function exportExcel() {
+        const authz = authHeaderValue();
+        if (!authz) {
+          logout();
+          return;
+        }
+        try {
+          const res = await fetch("/ops/export/metrics.xlsx", {
+            headers: { Authorization: authz },
+            cache: "no-store",
+          });
+          if (res.status === 401 || res.status === 403) {
+            alert(
+              "Phiên đăng nhập đã hết hạn hoặc không có quyền. Vui lòng đăng nhập lại."
+            );
+            logout();
+            return;
+          }
+          if (!res.ok) throw new Error("Export HTTP " + res.status);
+
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "ops_metrics.xlsx";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        } catch (e) {
+          alert("Export lỗi: " + (e.message || e));
+        }
+      }
+
+      // ========================
+      // 7) Init on page load
+      // ========================
+      (function init() {
+        if (getTokenRaw()) {
+          showDash();
+          setTimeout(() => bootstrap(), 0);
+        } else {
+          showLogin();
+        }
+      })();
+    </script>
+  </body>
+</html>
