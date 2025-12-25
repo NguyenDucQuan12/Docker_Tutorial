@@ -27,47 +27,47 @@ Cấu trúc dự án như sau:
 ```
 Docker/
 │
-├── .venv_docker/        # Môi trường ảo trong python
-├── .vscode/            # Cấu hình debug trong visual studio code
+├── .venv_docker/                    # Môi trường ảo trong python
+├── .vscode/                         # Cấu hình debug trong visual studio code
 ├── src/
-│   ├── main.py           # Tệp chính chạy chương trình
-│   ├── api/              # Các router (endpoint)
+│   ├── main.py                      # Tệp chính chạy chương trình
+│   ├── api/                         # Các router (endpoint)
 │   │   ├── __init__.py
 │   │   └── health_check.py
-│   ├── auth/              # Xác thực người dùng
+│   ├── auth/                        # Xác thực người dùng
 │   │   ├── __init__.py
 │   │   └── authentication.py
-│   ├── controller/              # Xử lý các api
+│   ├── controller/                  # Xử lý các api
 │   │   ├── __init__.py
 │   │   └── user_controller.py
-│   ├── db/               # Kết nối database
+│   ├── db/                          # Kết nối database
 │   |   ├── __init__.py
 │   |   └── database.py
-│   ├── log/               # Cấu hình ghi log
+│   ├── log/                         # Cấu hình ghi log
 │   |   ├── __init__.py
 │   |   └── api_log.py
-│   ├── middleware/              # middleware
+│   ├── middleware/                  # middleware
 │   │   ├── __init__.py
 │   │   └── logger.py
-│   ├── schemas/                # Các schema để validation dữ liệu
-│   │   ├── __init__.py      # Schema cho User
-│   │   └── user.py   
-│   ├── services/         # Các dịch vụ khác
+│   ├── schemas/                     # Các schema để validation dữ liệu
+│   │   ├── __init__.py              
+│   │   └── user.py                  # Schema cho User
+│   ├── services/                    # Các dịch vụ khác
 │   │   ├── __init__.py
-|   |   └── mail_service.py
-│   ├── test/               # Các tệp test api
+|   |   └── mail_service.py          # Gửi mail
+│   ├── test/                        # Các tệp test api
 │   │   ├── __init__.py
 |   |   └── file_api_test.py
-|   └──utils/
+|   └──utils/                        # Các hàm phụ trợ
 |       ├── __init__.py
 |       └── hash.py
 │
-├── requirements.txt      # Danh sách package cần cài
-├── .dockerignore            # Cấu hình bỏ qua các thư mục, tệp trong docker
-├── .env            # Tệp tin chứa cấu hình các thông số
-├── .gitignore            # Cấu hình bỏ qua các thư mục, tệp tin trong git
-├── Dockerfile            # Xây dựng các image cho docker
-├── docker-compose.yml    # Cấu hình các thông số khi chạy trên docker
+├── requirements.txt                 # Danh sách package cần cài
+├── .dockerignore                    # Cấu hình bỏ qua các thư mục, tệp trong docker
+├── .env                             # Tệp tin chứa cấu hình các thông số
+├── .gitignore                       # Cấu hình bỏ qua các thư mục, tệp tin trong git
+├── Dockerfile                       # Xây dựng các image cho docker
+├── docker-compose.yml               # Cấu hình các thông số khi chạy trên docker
 └── README.md
 ```
 
@@ -582,3 +582,63 @@ Còn với lệnh này thì ta sẽ lấy máy hiện tại làm máy chủ đ�
 #### Sử dụng Docker Desktop làm máy chủ (Khuyến nghị sau khi phát triển xong)
 Thay vì sử dụng VSCode để chạy FastAPI thì ta sử dụng `Docker Desktop` sẽ tốt hơn, vì nó có các dịch vụ hỗ trợ vận hành cực kỳ tốt.  
 Sử dụng Docker Desktop thì ta chạy với tệp tin `docker-compose.yml` như hướng dẫn ở phần I
+
+# IV. Đẩy image Docker lên Docker Hub
+
+Ta có thể chia sẻ các image cho nhau thông qua `Docker Hub`. Đây là nơi các `image` được lưu trữ, mỗi người dùng bình thường sẽ chỉ có 1 `image` chế độ `Private`, còn lại đều phải `public`.  
+
+![image](assets/github_img/docker_hub.png)
+
+Sau đó truy cập vào tab `Repositories`, đây là nơi lưu trữ các dự án của bản thân.  
+
+![image](assets/github_img/repository_docker_hub.png)
+
+Tại đây ta sẽ tạo các `repositories` ban đầu. Nó sẽ được dùng cho lưu trữ dự án. Ta sử dụng chức năng `create repository` để tạo 1 dự án mới.  
+
+![image](assets/github_img/create_new_repositories.png)
+
+Ta đặt tên cho dự án mới và viết mô tả về dự án này, sau đó chọn chế độ hiển thị cho dự án là `public` hoặc `private`. Sau đó ấn `Create` là hoàn thành.  
+
+Ở đây `Docker Hub` có gợi ý kết nối tới dự án như sau:  
+
+```docker
+docker tag local-image:tagname new-repo:tagname
+docker push new-repo:tagname
+```
+
+Tuy nhiên mình sẽ sử dụng phương pháp khác.  
+
+## 1. Tạo một image cùng với docker compose
+
+Đầu tiên ta tạo 1 dự án trên máy tính, có thể sử dụng `VS Code` để lập trình và tạo 1 tệp `Docker-compose.yml`.  
+Ta có thể lấy dự án mẫu ở bước 1. Sau đó khởi chạy image này trên Docker bằng lệnh:  
+
+```Docker
+Docker compose up --build -d
+```
+Sau khi khởi động dự án, ta thử truy cập xem dự án này đã hoạt động ổn định chưa, có gặp lỗi gì không. Đảm bảo hệ thống phải hoạt động trơn tru trước khi đẩy lên `Docker Hub`.  
+
+## 2. Gắn image vào DockerHub
+
+Ta sử dụng lệnh sau để `tag` một image ở máy tính cục bộ với `repositories` trên `DockerHub`.  
+
+```Docker
+docker tag <image_name>:<tag_local> <username>/<repository_name>:<tag_docker_hub>
+```
+
+Trong đó:  
+- `image_name`: Sẽ là tên image ta đặt cho dự án ở máy tính  
+- `tag_local`: Sẽ là tag của image ta đặt cho dự án ở máy tính  
+- `username`: Sẽ là tên người dùng `Docker Hub`, như tài khoản của tôi có `username` sẽ là `ducquan01`  
+- `repository_name`: Sẽ là tên `repository` mà ta đặt khi tạo  
+- `tag_docker_hub`: Là tên ta tự đặt, thường sẽ là để theo phiên bản `0.0.1`, `0.0.2`, `0.0.3`, ... Tên này sẽ hiển thị tại `DockerHub` sẽ giúp ta nhận biết được phiên bản ta tải lên  
+
+Ví dụ với 1 câu lệnh hoàn chỉnh như sau:  
+
+![image](assets/github_img/repository_local.png)
+
+Dự án tôi cần tải lên là: `mbo`, có tag `0.0.6`. Và ôi sẽ đưa nó lên repository có tên `mbo_website`  
+
+```Docker
+docker tag mbo:0.0.6 ducquan01/mbo_website:0.0.6
+```
