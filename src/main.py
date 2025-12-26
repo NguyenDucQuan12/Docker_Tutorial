@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from db.database import engine
 from db import models
 from log.system_log import _rotation_thread
-from api import user_login, file, health_check, update_application, security_admin, ops_dashboard
+from api import user_login, file, health_check, update_application, security_admin
 from middlerware import logger
 from middlerware.security_guard import security_guard  # # Middleware phòng thủ
 from auth import authentication
@@ -23,7 +23,7 @@ load_dotenv()  # Tự động tìm và nạp file .env ở thư mục hiện t�
 email_service = InternalEmailSender()
 
 
-# Đường dẫn thư mục lưu trữ file
+# Các thông tin cấu hình từ tệp env
 PORT_HOST = os.getenv("PORT_HOST", "8000")
 EMAIL_ADMIN = os.getenv("EMAIL_ADMIN", "nguyenducquan2001@gmail.com")
 IP_ADDRESS_HOST = os.getenv("IP_ADDRESS_HOST", "nguyenducquan2001@gmail.com")
@@ -49,9 +49,9 @@ async def lifespan(app: FastAPI):
 
 # Khởi tại FastAPi
 app = FastAPI(
-    docs_url="/myapi",  # Đặt đường dẫn Swagger UI thành "/myapi"
-    redoc_url=None,  # Tắt Redoc UI
-    # lifespan= lifespan  # Thêm câu lệnh lifespan
+    docs_url="/myapi",      # Đặt đường dẫn Swagger UI thành "/myapi"
+    redoc_url=None,         # Tắt Redoc UI
+    # lifespan= lifespan    # Thêm câu lệnh lifespan
 )
 
 # # Đăng ký middleware bảo vệ (đặt càng sớm càng tốt)
@@ -67,7 +67,6 @@ app.include_router(health_check.router)
 app.include_router(authentication.router)
 app.include_router(update_application.router)
 app.include_router(security_admin.router)
-app.include_router(ops_dashboard.router)
 
 # Tạo icon cho trang web api, nó sẽ hiển thị hình ảnh favicon ở thư mục `static/favicon.ico`
 @app.get('/favicon.ico')
