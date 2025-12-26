@@ -27,8 +27,9 @@ Cấu trúc dự án như sau:
 ```
 Docker/
 │
-├── .venv_docker/                    # Môi trường ảo trong python
-├── .vscode/                         # Cấu hình debug trong visual studio code
+├── .venv_docker/                    # Môi trường ảo trong python (Tự sinh ra khi chạy câu lệnh tạo môi trường ảo của Python)
+├── .vscode/                         # Cấu hình debug trong visual studio code (Tự sinh ra khi chạy Debug lần đầu, không cần tạo)
+├── redis-data/                      # Thư mục để mount dữ liệu từ Redis ở Docker ra ngoài
 ├── src/
 │   ├── main.py                      # Tệp chính chạy chương trình
 │   ├── api/                         # Các router (endpoint)
@@ -52,6 +53,12 @@ Docker/
 │   ├── schemas/                     # Các schema để validation dữ liệu
 │   │   ├── __init__.py              
 │   │   └── user.py                  # Schema cho User
+│   ├── security/                    # Cơ chế bảo vệ server
+│   │   ├── __init__.py              
+│   │   ├── config.py              
+│   │   ├── keyspace.py              
+│   │   ├── rate_limiter.py          # Kiểm soát truy cập bằng cách rate limit
+│   │   └── redis_client.py          # Tạo kết nối tới Redis
 │   ├── services/                    # Các dịch vụ khác
 │   │   ├── __init__.py
 |   |   └── mail_service.py          # Gửi mail
@@ -65,6 +72,7 @@ Docker/
 ├── requirements.txt                 # Danh sách package cần cài
 ├── .dockerignore                    # Cấu hình bỏ qua các thư mục, tệp trong docker
 ├── .env                             # Tệp tin chứa cấu hình các thông số
+├── enviroment.txt                   # Hướng dẫn tạo tệp .env phù hợp với ứng dụng
 ├── .gitignore                       # Cấu hình bỏ qua các thư mục, tệp tin trong git
 ├── Dockerfile                       # Xây dựng các image cho docker
 ├── docker-compose.yml               # Cấu hình các thông số khi chạy trên docker
@@ -539,7 +547,7 @@ Vì dự án của chúng ta sử dụng cache của `Redis` giúp cho chúng ta
 docker run -p 6379:6379 -it redis:latest
 ```
 Nó sẽ lấy phiên bản mới nhất của `Redis` và khởi chạy, như vậy là hoàn tất khởi chạy `Redis`. Tuy nhiên để ta sẽ chạy một câu lệnh chi tiết hơn như sau:  
-```dcoker
+```docker
 docker run -d --name my-redis -p 6379:6379 -v ./redis-data:/data -e TZ=Asia/Ho_Chi_Minh redis:latest --appendonly yes
 ```
 
