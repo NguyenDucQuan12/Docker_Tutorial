@@ -28,9 +28,9 @@ BUCKET_BY_PATH = {
 
 # Rate limit theo bucket (window_ms + limit)
 RATE = {
-    "global": dict(window_ms=60_000, limit=120),  # # 120 req / 60s / IP
-    "login":  dict(window_ms=60_000, limit=10),   # # /login chặt hơn, chỉ cho phép 10 req/60s/ip
-    "upload": dict(window_ms=60_000, limit=20),   # # /upload trung bình
+    "global": dict(window_ms=60_000, limit=120),  # 120 req / 60s / IP
+    "login":  dict(window_ms=60_000, limit=10),   # /login chặt hơn, chỉ cho phép 10 req/60s/ip
+    "upload": dict(window_ms=60_000, limit=20),   # /upload trung bình
 }
 
 # Luật BAN dựa trên điểm nghi vấn trong 5 phút

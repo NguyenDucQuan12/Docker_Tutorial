@@ -27,13 +27,13 @@ def get_redis():
     """
     url = os.getenv("REDIS_URL", "redis://localhost:6379/0")  # REDIS_URL chuẩn trong Docker: redis://redis:6379/0
 
-    pool = redis.ConnectionPool.from_url(                     # # Tạo pool kết nối từ URL
+    pool = redis.ConnectionPool.from_url(                     # Tạo pool kết nối từ URL
         url,
-        socket_keepalive=True,                                # # Giữ kết nối lâu dài (keepalive)
-        socket_timeout=2.0,                                   # # Timeout thao tác (giây)
-        socket_connect_timeout=2.0,                           # # Timeout kết nối (giây)
-        max_connections=200,                                  # # Giới hạn số kết nối đồng thời từ app
-        health_check_interval=30,                             # # Ping định kỳ phát hiện kết nối chết
-        decode_responses=False                                # # Trả về bytes (nhanh, ít decode)
+        socket_keepalive=True,                                # Giữ kết nối lâu dài (keepalive)
+        socket_timeout=0.2,                                   # Timeout thao tác (giây)
+        socket_connect_timeout=0.5,                           # Timeout kết nối (giây)
+        max_connections=200,                                  # Giới hạn số kết nối đồng thời từ app
+        health_check_interval=30,                             # Ping định kỳ phát hiện kết nối chết
+        decode_responses=False                                # Trả về bytes (nhanh, ít decode)
     )
-    return redis.Redis(connection_pool=pool)                  # # Tạo client trỏ vào pool và trả về
+    return redis.Redis(connection_pool=pool)                  # Tạo client trỏ vào pool và trả về

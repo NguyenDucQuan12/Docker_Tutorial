@@ -1,4 +1,6 @@
 from typing import Tuple                 # # Kiểu trả về (bool, int)
+import time
+from log.system_log import system_logger
 from security.redis_client import get_redis      # # Hàm tạo client Redis
 
 """
@@ -63,9 +65,62 @@ else
 end
 """
 
-# # Biên dịch & cache script trên Redis (tăng hiệu năng)
+# Biên dịch & cache script trên Redis (tăng hiệu năng)
 _redis = get_redis()
-SLIDING_WINDOW_SCRIPT = _redis.register_script(SLIDING_WINDOW_LUA)
+
+# Redis down -> skip kiểm tra trong COOL_DOWN giây
+REDIS_RL_COOLDOWN_SECONDS = 5.0
+
+# Timestamp đến khi nào thì sẽ skip Redis (circuit breaker)
+_skip_until_ts: float = 0.0
+
+# Throttle log: tối đa 1 log/giây
+_last_log_ts: float = 0.0
+_LOG_EVERY_SECONDS = 1.0
+
+def _should_skip_redis() -> bool:
+    """Trả True nếu đang trong thời gian skip Redis do lỗi trước đó."""
+    return time.time() < _skip_until_ts
+
+def _mark_redis_down() -> None:
+    """Đánh dấu Redis down và skip trong REDIS_RL_COOLDOWN_SECONDS giây."""
+    global _skip_until_ts
+    _skip_until_ts = time.time() + REDIS_RL_COOLDOWN_SECONDS
+
+def _log_redis_error_once(ex: Exception, op: str) -> None:
+    """Log lỗi Redis có throttle để tránh spam."""
+    global _last_log_ts
+    now = time.time()
+    if now - _last_log_ts >= _LOG_EVERY_SECONDS:
+        _last_log_ts = now
+        system_logger.warning("RateLimiter Redis error at %s (skip %.1fs): %s", op, REDIS_RL_COOLDOWN_SECONDS, ex)
+
+
+# Chạy Script LUA an toàn trong trường hợp Redis sập
+SLIDING_WINDOW_SCRIPT = None
+
+def _ensure_script():
+    """
+    Đảm bảo SLIDING_WINDOW_SCRIPT đã được register.
+    - Nếu Redis down: không throw ra ngoài; bật circuit breaker và giữ script = None
+    - Khi Redis hồi: lần gọi sau sẽ register lại
+    """
+    global SLIDING_WINDOW_SCRIPT
+
+    # Nếu đang skip Redis -> không làm gì
+    if _should_skip_redis():
+        return
+
+    # Nếu script đã có -> ok
+    if SLIDING_WINDOW_SCRIPT is not None:
+        return
+
+    try:
+        SLIDING_WINDOW_SCRIPT = _redis.register_script(SLIDING_WINDOW_LUA)  # register script trên Redis
+    except Exception as ex:
+        _log_redis_error_once(ex, "REGISTER_SCRIPT")  # log lỗi
+        _mark_redis_down()                            # bật skip
+        SLIDING_WINDOW_SCRIPT = None                  # giữ None để lần sau thử lại
 
 # # Tạo tên key rate-limit theo IP + nhóm (bucket)
 def rl_key(ip: str, bucket: str) -> str:
@@ -87,12 +142,33 @@ def rl_check(ip: str, bucket: str, window_ms: int, limit: int) -> Tuple[bool, in
     - limit: Số request giới hạn trong window_ms  
     Giả sử window_ms = 60_000 (60 giây), limit = 120 (tức ~2 rps trung bình).  
     Kiểm tra ip này có truy cập 1 api có bucket như trên vượt quá 120 request trong vòng 60s không
-
+    - Redis OK: chạy Lua, trả kết quả thật
+    - Redis down: fail-open -> return (True, 0)
+    - Redis down sẽ skip trong COOL_DOWN giây, tránh mỗi request chờ timeout
     """
-    res = SLIDING_WINDOW_SCRIPT(              # # Chạy Lua atomically
-        keys=[rl_key(ip, bucket)],            
-        args=[window_ms, limit]
-    )
-    allowed = (res[0] == 1)                   # # 1 -> allowed
-    count = int(res[1])                       # # số request hiện tại trong cửa sổ
-    return allowed, count                     # # Trả kết quả
+    # Nếu đang skip Redis -> fail-open ngay lập tức
+    if _should_skip_redis():
+        return True, 0
+
+    # Đảm bảo script đã register (nếu chưa có)
+    _ensure_script()
+
+    # Nếu script vẫn None (do Redis down) -> fail-open
+    if SLIDING_WINDOW_SCRIPT is None:
+        return True, 0
+
+    try:
+        # Chạy Lua atomically
+        res = SLIDING_WINDOW_SCRIPT(
+            keys=[rl_key(ip, bucket)],
+            args=[window_ms, limit],
+        )
+        allowed = (res[0] == 1)              # 1 -> allowed
+        count = int(res[1])                  # số request trong cửa sổ
+        return allowed, count
+    
+    except Exception as ex:
+        # Redis lỗi trong lúc call script -> bật circuit breaker và fail-open
+        _log_redis_error_once(ex, "SCRIPT_CALL")
+        _mark_redis_down()
+        return True, 0
