@@ -11,6 +11,7 @@ ALGORITHM = Thuật toán mã hóa (Có thể sử dụng HS256) (ALGORITHM = HS
 ACCESS_TOKEN_EXPIRE_MINUTES = Thời gian tồn tại của token trong bao lâu, đơn vị là phút (15: là 15 phút)
 
 # Cấu hình CSDL
+DB_HOST = localhost # localhost là dành cho nội bộ SQL Server, host.docker.internal là SQL Server chạy trên docker
 DB_USER = Tên đăng nhập cho SQL Server
 DB_PASSWORD = Mật khẩu đăng nhập cho tài khoản SQL Server
 DB_NAME = Tên CSDL cần truy cập trong SQL Server
@@ -27,7 +28,15 @@ PORT_HOST = PORT sẽ mở truy cập api
 
 # Cấu hình thông tin dịch vụ email
 EMAIL_SENDER = No-Reply-Terumo@terumo.com  # Địa chỉ email để gửi mail, nếu sử dụng Iternal thì đọc địa chỉ email bất kỳ
-PASSWORD_EMAIL_SENDER = 0  # Mật khẩu của email đã cung cấp (Nếu dùng Internal thì ko cần điền mật khẩu)
+PASSWORD_EMAIL_SENDER = 0  # Mật khẩu của email đã cung cấp (Nếu dùng Internal thì ko cần điền mật khẩu), còn nếu sử dụng gmail thì có thể thay thế password bằng mật khẩu ứng dụng của gmail
 SMTP_HOST = 12.34.56.78  # Nếu gmail: smtp.gmail.com, nếu outlook: smtp.office365.com, nếu Internal: Hỏi bộ phận IT (là địa chỉ IP như: 10.1.1.25)
 SMTP_PORT = 910        # Nếu gmail: 587, nếu outlook: 587, nếu Internal: hỏi bộ phận IT
 EMAIL_SERVICES = Internal  # 3 dịch vụ phổ biến là Gmail, Outlook và Internal (sử dụng mạng nội bộ để gửi mail, có thể đặt tên mail tùy ý)
+
+# Ngưỡng cảnh báo theo phút khi phát hiện tấn công (Dùng cho Security: RATE LIMITER)
+ALERT_REQ_PER_MIN=3000
+ALERT_5XX_PER_MIN=100
+ALERT_BANS_PER_MIN=30
+
+# Cấu hình nhận thông báo khởi động và kết thúc phần mềm
+EMAIL_ADMIN = nguyenducquan2001@gmail.com
