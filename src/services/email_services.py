@@ -239,6 +239,34 @@ class InternalEmailSender():
                                                 attachment_path=attachment_path, callback=callback)
     
         return success_send_email
+    
+    def send_mail_for_redis_crash(self, to_email, reason, attachment_path = None, callback = None):
+        """
+        Gửi mail thông báo về việc không thể kết nối tới redis
+        
+        :param self: Description
+        :param to_email: Description
+        :param attachment_path: Description
+        :param callback: Description
+        """
+        subject_mail = f"Không thể kết nối tới Redis"
+        body_alert = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; color: #333;">
+                <p>Hệ thống không thể truy cập được Redis</p>
+                <p>Hệ thống không thể kết nối tới Redis trong thời gian dài, vui lòng kiểm tra lại máy chủ Redis để đảm bảo các chức năng hoạt động bình thường.</p> 
+                <p> {reason}</p>
+                <br>
+                <p>Đây là mail tự động, vui lòng không phản hồi mail này!</p>
+            </body>
+        </html>
+        """
+        # Gửi email với nội dung và chữ ký
+        success_send_email = self.send_email_async(to_email = to_email, subject = subject_mail, 
+                                             body= body_alert, signature = self.signature_email, 
+                                             attachment_path = attachment_path, callback= callback)
+        
+        return success_send_email
 
     def send_email_for_new_account(self, to_email, name, website_name, attachment_path=None, callback=None):
         """
