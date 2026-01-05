@@ -481,7 +481,322 @@ if current_user["Privilege"] not in HIGH_PRIVILEGE_LIST:
     )
 ```
 
-# III. Khởi chạy phần mềm  
+# III. Cách viết Docker File
+
+Trong dự án của ta có tệp tin là `Dockerfile`, nó sẽ có hình con cá voi.  
+
+![image](assets/github_img/dockerfile_icon.png)  
+
+## 1. Cấu hình Dockerfile 
+
+Đầu tiên ta tạo 1 tệp `Requirements.docker.txt`, tệp này chỉ chứa các gói cần thiết cho dự án khi được sử dụng trong `Docker` tránh khi sử dụng `python -m pip freeze > requirements.txt` kéo hàng trăm gói nặng khác mà không cần thiết.  
+
+Ví dụ 1 tệp nhưu sau:  
+```Dockerfile
+# ===== Web API =====
+fastapi==0.128.0
+uvicorn[standard]==0.40.0
+python-multipart==0.0.21
+orjson==3.11.5
+python-dotenv==1.2.1
+
+# ===== Redis / Job Queue (RQ) =====
+redis==7.1.0
+rq==2.6.1
+
+# ===== OCR / PDF / Image =====
+paddleocr==3.3.2
+paddlex==3.3.12
+opencv-contrib-python==4.10.0.84
+pillow==11.2.1
+pypdfium2==5.2.0
+
+# ===== logging/monitor =====
+psutil==7.1.3
+......
+```
+Với các thư viện cài khác, không sử dụng `pip install xxx` thì không thêm vào tệp này.  
+
+Sau đó tạo `.dockerignore` để không phá cache build.  
+```dockerfile
+# Thư mục venv
+.venv
+
+# Các tệp được tạo ra khi chạy dự án
+__pycache__/
+*.pyc
+
+# Git
+.git/
+.gitignore
+
+# data/models là bind-mount runtime, không copy vào image
+data/
+models/
+
+# logs/output runtime
+output/
+logs/
+uploads/
+
+```
+
+### 1.1 Hướng DEV
+
+Trong quá trình viết code, ta luôn thay đổi các tệp tin code, còn các thư viện không thay đổi thường xuyên thì ta sẽ làm như sau:  
+Tạo 1 tệp `Dockerfile.dev`, tệp tin này chịu trách nhiệm tải các thư viện. Nếu thay đổi thư viện thì lúc đó ta sẽ chạy lại từ đầu, còn nếu không thay đổi các thư viện thì không cần.  
+
+Mẫu `Dockerfile` như sau:  
+```Dockerfile
+# ========= Base image (Python 3.12 slim) =========
+FROM python:3.12-slim
+
+# ========= ENV cơ bản =========
+# PYTHONDONTWRITEBYTECODE: không tạo file .pyc -> gọn, tránh rác
+# PYTHONUNBUFFERED: log ra stdout ngay (docker logs thấy realtime)
+# PIP_DISABLE_PIP_VERSION_CHECK: giảm noise khi install
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# ========= Thư mục làm việc trong container =========
+WORKDIR /app
+
+# ========= Cài gói hệ thống =========
+# build-essential: cần nếu có gói phải compile (vd pyodbc)
+# curl/ca-certificates/gnupg: để add repo Microsoft ODBC
+# libgl1/libglib2.0-0: OpenCV/Pillow thường cần
+# libgomp1/libstdc++6: hay cần để import Paddle core (libpaddle.so) ổn định trên slim
+# Cần cái nào thì cài cái đó, ko cần cái nào thì xóa dòng đó
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    ca-certificates \
+    gnupg \
+    libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
+    libstdc++6 \
+  && rm -rf /var/lib/apt/lists/*
+
+# ========= Cài ODBC Driver 18 + unixODBC (nếu dùng pyodbc để kết nối tới SQL Server) =========
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/ms-prod.gpg && \
+    echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/ms-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" > /etc/apt/sources.list.d/msprod.list && \
+    apt-get update && \
+    ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 unixodbc-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# ========= Tạo user non-root =========
+RUN groupadd -g 1000 app && \
+    useradd -m -u 1000 -g app -s /usr/sbin/nologin app
+
+# ========= Dependency layer (tối ưu cache) =========
+# Copy requirements.docker.txt vào image.
+# Khi bạn chỉ sửa code, file này không đổi => Docker dùng cache => không cài lại libs nặng.
+COPY requirements.docker.txt /app/requirements.docker.txt
+
+# Nâng pip tooling trước
+RUN pip install --upgrade pip setuptools wheel
+
+# Cài PaddlePaddle GPU CUDA 11.8 bằng index cu118 (theo hướng dẫn chính thức).
+RUN python -m pip install paddlepaddle-gpu==3.2.2 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
+# Cài đặt safetensors đối với dùng PaddleOCR
+RUN python -m pip install https://paddle-whl.bj.bcebos.com/nightly/cu126/safetensors/safetensors-0.6.2.dev0-cp38-abi3-linux_x86_64.whl
+
+# Cài các gói còn lại (API/RQ/OCR/PDF…) nằm trong tệp requirements
+RUN pip install -r /app/requirements.docker.txt
+
+# ========= PYTHONPATH để import theo kiểu "from config import ..." =========
+# Thư mục src trong dự án chứa toàn bộ code
+ENV PYTHONPATH=/app/src
+
+# ========= Tạo sẵn thư mục runtime và gán quyền =========
+RUN install -d -o app -g app /app/uploads /app/log/api_log /app/log/system_log
+
+# Chạy bằng user app
+USER app
+
+# Mở cổng API
+EXPOSE 8000
+
+# DEV: không COPY code ở đây.
+# Code sẽ được bind-mount từ host bằng docker-compose.
+# Lệnh chạy sẽ đặt trong docker-compose (để bật --reload).
+```
+
+Image này sẽ chứa toàn bộ thư viện mà ta sử dụng (Paddle GPU, OCR lib, ODBC, ...). Sau đó tệp `docker-compose.dev.yaml` sẽ `mount` thư mục chứa code vào container, khi nào ta sử code trên máy tính là container thấy ngay, tự động cập nhật code mới.  
+
+Đây là tệp `docker-compose.dev.yaml` mẫu:  
+``` Dockerfile
+services:
+  # ===== Redis: nơi lưu job queue + metadata =====
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"           # expose để debug local (có thể bỏ trong production)
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]   # container healthy khi ping OK
+      interval: 3s
+      timeout: 1s
+      retries: 10
+
+  # ===== API service =====
+  api:
+    build:
+      context: .              # build từ thư mục dự án hiện tại
+      dockerfile: Dockerfile.dev
+    env_file: .env
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app/src
+      # cache/model của Paddle/PaddleX -> mount vào /app/models để giữ qua lần chạy
+      - PADDLE_PDX_CACHE_HOME=/app/models
+      # (khuyên) timezone nếu app bạn cần
+      - TZ=Asia/Ho_Chi_Minh
+    volumes:
+      # bind-mount code: sửa code là chạy ngay, không build lại
+      - ./src:/app/src
+      - ./worker:/app/worker
+
+      # giữ model/cache để không tải lại
+      - ./models:/app/models
+
+      # giữ input/output job (status/result/export images)
+      - ./data:/data
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    # DEV: uvicorn reload (main.py nằm trong /app/src, và PYTHONPATH đã trỏ /app/src)
+    command: ["bash", "-lc", "uvicorn main:app --host 0.0.0.0 --port 8000 --reload"]
+
+  # ===== Worker (multi-gpu) =====
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    env_file: .env
+    environment:
+      - PYTHONPATH=/app/src
+      - PADDLE_PDX_CACHE_HOME=/app/models
+      - TZ=Asia/Ho_Chi_Minh
+    volumes:
+      - ./src:/app/src
+      - ./worker:/app/worker
+      - ./models:/app/models
+      - ./data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    gpus: all                 # cấp GPU vào container (yêu cầu NVIDIA Container Toolkit)
+    command: ["bash", "-lc", "python /app/worker/worker_multi_gpu.py"]
+```
+
+Và cách chạy như sau:  
+Khi ta chạy lần đầu hoặc thay đổi Dockerfile, requirement (liên quan đến các thư viện đang sử dụng):  
+Cài đặt các thư viện cần thiết  
+```Docker
+docker compose -f docker-compose.dev.yml build
+```
+Sau đó khởi chạy  
+```Docker
+docker compose -f docker-compose.dev.yml up -d
+```
+Đối với API thì khi đổi code nó có chức năng tự reload nên ta ko cần chạy lại, còn các worker thì ta cần restart lại là được. Vi vậy với việc cập nhật, chỉnh sửa code ta chạy như sau cho 1 worker:  
+```Docker
+docker compose -f docker-compose.dev.yml restart worker
+```
+### 1.2 Hướng Production
+
+Trong production, thường không bind-mount code (để triển khai ổn định). Nhưng vẫn muốn:  
+- layer dependency cache (không cài lại Paddle GPU - các thư viện nặng, ít thay đổi)  
+- model/cache và data vẫn mount ngoài để không mất.  
+
+Giải pháp: Dockerfile multi-stage theo kiểu “deps -> runtime” (nhưng runtime vẫn dựa trên deps để giữ ODBC libs và site-packages).
+
+Ta sẽ viết tệp `Dockerfile` tương tự như mẫu hoàn chỉnh dưới đây.  
+
+```Dockerfile
+# ========= Chọn phiên bản Python phù hợp với dự án (slim cho nhẹ, tuy nhiên nó sẽ thiếu nhiều thư viện hệ thống) =========
+FROM python:3.12-slim AS base
+
+# ========= ENV cơ bản =========
+# - Không tạo .pyc
+# - Log đi thẳng ra stdout (không buffer)
+# - Không lưu cache pip (image nhẹ)
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+# ========= Cài gói hệ thống cần thiết =========
+# - build-essential: biên dịch một số lib Python (vd: pyodbc)
+# - curl, ca-certificates, gnupg: để thêm repo Microsoft và xác thực
+# - libgl1: hỗ trợ các backend liên quan hiển thị/ảnh (OpenCV hay cần)
+# - libglib2.0-0: dependency phổ biến để tránh lỗi runtime thiếu lib
+# ...
+# Sau khi cài xong, xóa cache apt để giảm size image (&& rm -rf /var/lib/apt/lists/*)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    ca-certificates \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# ========= Cài ODBC Driver 18 + unixODBC cho SQL Server =========
+# Mặc định linux khi sử dụng thư viện msslq thì ko cần phải cài thêm driver hay gì thêm
+# Khi sử dụng pyodbc thì cần driver ODBC, mà trong linux không có driver ODBC nên ta sẽ cài ODBC phiên bản 18 (Sửa code khi kết nối sử dụng ODBC driver phiên bản 18)
+
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/ms-prod.gpg && \
+    echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/ms-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" > /etc/apt/sources.list.d/msprod.list && \
+    apt-get update && \
+    ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 unixodbc-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# ========= Tạo user non-root (an toàn hơn) =========
+# Không nên chạy với quyền root (Cao nhất) tránh các thao tác không đáng có, luôn hạn chế quyền
+# - Cố định UID/GID = 1000 giúp bind-mount từ host Linux đỡ vướng quyền
+RUN groupadd -g 1000 app && \
+    useradd -m -u 1000 -g app -s /usr/sbin/nologin app
+
+# ========= Thư mục làm việc mặc định trong container =========
+WORKDIR /app
+
+# =========  Thường các thư viện GPU sẽ ko có trên PyPI, và tải bằng câu lệnh riêng ======================
+# Xóa các thư viện này ở trong requirements, vì nó sẽ được cài riêng (ví dụ: paddlepaddle-gpu, ...)
+# Nâng setuptools/wheel để giảm lỗi build wheel
+# Cài PaddlePaddle GPU đúng CUDA 11.8 bằng index chính thức (cu118)
+# Sau đó mới cài phần còn lại từ requirements.txt
+# RUN python -m pip install --upgrade setuptools wheel \
+#     && python -m pip install paddlepaddle-gpu==3.2.2 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/ 
+
+# =========  Copy tệp requirements và cài đặt thư viện theo layer cache =========
+COPY requirements.txt /app/requirements.txt
+RUN pip install --upgrade pip && pip install -r /app/requirements.txt
+
+# ========= Copy code vào container =========
+# --chown đảm bảo code thuộc về user "app", own là owner
+COPY --chown=app:app . /app
+
+# Chuyển đổi thời gian trong container về múi giờ Vietnam (UTC+7)
+RUN ln -sf /usr/share/zoneinfo/Asia/Ho_Chi_Minh /etc/localtime \
+    && echo "Asia/Ho_Chi_Minh" > /etc/timezone
+
+# Tạo sẵn thư mục uploads và gán quyền
+RUN install -d -o app -g app /app/uploads /app/update_application /app/log/api_log /app/log/system_log
+
+# Chạy dưới user vừa tạo (app)
+USER app
+
+# ========= Mở cổng ứng dụng =========
+EXPOSE 8000
+
+# ========= Lệnh khởi động =========
+CMD ["fastapi", "run", "src/main.py", "--port", "8000"]
+```
+
+# IV. Khởi chạy phần mềm  
 
 Để chạy bằng `Docker` thì đầu tiên ta sẽ khởi động ứng dụng `Docker` trên máy tính. Nếu chưa có thì tiến hành tải `Docker` từ trang chủ về trước.
 
