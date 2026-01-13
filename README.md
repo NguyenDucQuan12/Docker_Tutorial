@@ -931,6 +931,29 @@ docker push new-repo:tagname
 
 Tuy nhiên mình sẽ sử dụng phương pháp khác.  
 
+Đầu tiên ta cần đăng nhập vào `Docker Desktop` bằng nút `Login` trên phần mềm hoặc sử dụng `CLI` gõ lệnh sau để đăng nhập:  
+```bash
+docker login
+```
+Ví dụ:  
+```bash
+(PaddleOCR) PS D:\Project\PaddleOCR> docker login
+
+USING WEB-BASED LOGIN
+
+i Info → To sign in with credentials on the command line, use 'docker login -u <username>'
+
+
+Your one-time device confirmation code is: NHPQ-MCSX
+Press ENTER to open your browser or submit your device code here: https://login.docker.com/activate
+
+Waiting for authentication in the browser…
+
+Login Succeeded
+```
+
+Và làm theo hướng dẫn.  
+
 ## 1. Tạo một image cùng với docker compose
 
 Đầu tiên ta tạo 1 dự án trên máy tính, có thể sử dụng `VS Code` để lập trình và tạo 1 tệp `Docker-compose.yml`.  
