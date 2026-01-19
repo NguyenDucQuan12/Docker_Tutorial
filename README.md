@@ -18,6 +18,47 @@ Thêm các hình ảnh cài docker vào các bước phía dưới
 ## 2. Một số lỗi khi cài đặt
 Dưới đây là một số lỗi xảy ra trong quá trình cài đặt `Docker Desktop`  
 
+## 3. Di chuyển thư mục lưu trữ Docker Desktop
+
+Mặc định khi cài đặt `Docker Desktop` thì thư mục lưu trữ các tệp tin của `Docker` sẽ nằm tại ổ đĩa `C:`.  
+
+![image](assets/github_img/image_folder_docker.png)  
+
+Nếu ổ đĩa `C:` của bạn có dung lượng thấp thì ta nên di chuyển thư mục này sang ổ đĩa khác có dung lượng lớn hơn để tránh việc `Docker Desktop` bị đầy ổ đĩa và không thể hoạt động được.  
+Ta di chuyển thư mục `C:\Users\Server_Quan_IT\AppData\Local\Docker` ổ đĩa `D:` để lưu trữ các tệp tin của `Docker Desktop`.  
+
+![image](assets/github_img/move_docker_folder.png) 
+
+> Lưu ý nếu gặp các lỗi khi thao tác với thư mục thì ta nên dừng `Docker Desktop` bằng cách ấn thoát và ở dưới khay ứng dụng (ở thanh taskbar dưới màn hình) ta chuột phải và chọn `Quit Docker Desktop` và mở terminal chạy lệnh `wsl --shutdown` lại rồi thao tác.  
+
+Để di chuyển thư mục lưu trữ của `Docker Desktop` ta làm như sau:  
+1. Mở `Docker Desktop` lên, chọn `Settings`  
+
+![image](assets/github_img/docker_settings.png)
+
+2. Chọn `Resources` -> `Advanced` -> Tại mục `Disk image location` chọn `Browse` để chọn thư mục lưu trữ mới cho `Docker Desktop`  
+
+![image](assets/github_img/docker_disk_image_location.png)
+
+Mặc định khi chọn thư mục mới thì `Docker Desktop` sẽ tự tạo thư mục con là `DockerDesktopWSL` trong thư mục bạn chọn.
+
+3. Chọn thư mục mới và chọn `Apply & Restart` để áp dụng thay đổi và khởi động lại `Docker Desktop`  
+
+![image](assets/github_img/docker_apply_restart.png)
+
+Bởi vì Docker đã tạo 1 thư mục con mới, nên tất cả container cũ, image cũ sẽ không thấy.  
+Để có thể sử dụng lại các container, image cũ thì ta cần di chuyển thư mục `main` và `disk` từ thư mục `D:\Docker\wsl` sang thư mục `D:\Docker\wsl\DockerDesktopWSL` mà vừa tạo.  
+
+![image](assets/github_img/copy_container_docker.png)
+
+Ta có thể thấy trong thư mục mới đã có tệp tin `docker_data` và nó chứa `103GB`. Có nghĩa là đã có data.  
+
+![image](assets/github_img/disk_docker_desktop.png)
+
+4. Sau khi di chuyển xong thì ta khởi động lại `Docker Desktop` và kiểm tra lại các container, image đã có sẵn.  
+
+![image](assets/github_img/container_docker_desktop.png)
+
 # II. Xây dựng phần mềm chạy với Docker  
 
 ## 1. Cấu trúc dự án
