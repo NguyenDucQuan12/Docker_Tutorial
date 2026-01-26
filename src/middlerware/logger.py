@@ -7,6 +7,7 @@ from fastapi import Request
 from fastapi.responses import Response
 from starlette.concurrency import iterate_in_threadpool
 from log.api_log import logger
+from utils.get_ip_client import get_client_ip
 
 # Các đường dẫn ít giá trị (giảm ồn). Có thể bỏ /docs,/redoc nếu bạn muốn log cả trang docs.
 EXCLUDED_PATHS = {"/redoc", "/docs", "/openapi.json"}
@@ -50,7 +51,7 @@ async def log_requests(request: Request, call_next):
     cid = request.headers.get("x-request-id") or str(uuid.uuid4())
 
     # Lấy IP/hostname của client (gethostbyaddr có thể tốn thời gian nếu DNS ngược chậm)
-    client_ip = request.client.host if request.client else "-"
+    client_ip = get_client_ip(request= request)
     try:
         client_hostname = socket.gethostbyaddr(client_ip)[0]
     except Exception:

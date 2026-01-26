@@ -15,7 +15,7 @@ from security.keyspace import (
     k_metric_req, k_metric_5xx, k_metric_bans,
     k_ban_ip, k_ban_notify, k_suspicious
 )
-from utils.utils import _norm_ip
+from utils.get_ip_client import norm_ip, get_client_ip
 from log.system_log import system_logger
 
 
@@ -270,21 +270,6 @@ def _is_ip_in_trusted_proxies(ip_str: str) -> bool:
 
     return False
 
-def _get_client_ip(request) -> str:
-    """
-    Lấy IP client.
-    - Nếu có X-Forwarded-For: lấy phần tử đầu (client gốc). Vì nếu triển khai trên Nginx thì ưu tiên X-Forwarded-For
-    - Else: request.client.host
-    """
-    # Lưu ý một số nginx có thể set header là "X-real-ip", cần thay đổi cho đúng
-    xff = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
-    if xff:
-        # format: "client, proxy1, proxy2"
-        return xff.split(",")[0].strip()
-    
-    client = request.client
-    return client.host if client else "unknown"
-
 def _pick_bucket(path: str) -> str | None:
     """
     Match bucket theo prefix để không phụ thuộc exact path.
@@ -356,10 +341,10 @@ async def security_guard(request: Request, call_next):
     """
 
     # Lấy IP client (trong Docker trực tiếp sẽ là IP client. Nếu sau reverse-proxy (Thường là sử dụng Nginx), nên đọc X-Forwarded-For và xác thực trusted proxies)
-    client = _get_client_ip(request= request)
+    client = get_client_ip(request= request)
 
     # Chuẩn hóa lại ip
-    is_ip, client_ip = _norm_ip(client)
+    is_ip, client_ip = norm_ip(client)
 
     # Nếu địa chỉ IP không hợp lệ thì trả về lỗi
     if not is_ip:
